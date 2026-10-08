@@ -1,4 +1,4 @@
-import type { Anchor, Comparison, Data, Estimate } from './data.ts';
+import type { Anchor, Comparison, Data, Estimate, SubjectType } from './data.ts';
 
 const sigmoid = (x: number) => 1 / (1 + Math.exp(-x));
 const clamp = (x: number, low: number, high: number) => Math.max(low, Math.min(high, x));
@@ -26,10 +26,10 @@ export function anchorStrength(rate: number): number {
   return theta;
 }
 
-export function estimate(data: Data, subjectId: number): Estimate {
-  const anchors = new Map(data.anchors.map(a => [a.id, anchorStrength(a.rate)]));
+export function estimate(data: Data, subjectId: number, type: SubjectType): Estimate {
+  const anchors = new Map(data.anchors.filter(a => a.type === type).map(a => [a.id, anchorStrength(a.rate)]));
   const prior = anchors.get(subjectId) ?? (anchors.size ? [...anchors.values()].reduce((a, b) => a + b, 0) / anchors.size : 0);
-  const observations = data.comparisons.filter(c => c.target === subjectId && c.outcome !== 'skip' && anchors.has(c.reference));
+  const observations = data.comparisons.filter(c => c.target === subjectId && c.subjectType === type && c.outcome !== 'skip' && anchors.has(c.reference));
   let theta = prior;
   let precision = data.config.shrinkage;
   if (data.config.model === 'elo') {
@@ -70,11 +70,11 @@ export function chooseReference(anchors: Anchor[], target: number, strength: num
     Math.abs(anchorStrength(a.rate) - strength) - Math.abs(anchorStrength(b.rate) - strength) || a.id - b.id)[0];
 }
 
-export function recordEstimate(data: Data, subjectId: number): void {
+export function recordEstimate(data: Data, subjectId: number, type: SubjectType): void {
   const previous = data.records.find(r => r.subjectId === subjectId);
   const current = data.anchors.find(a => a.id === subjectId)?.rate ?? null;
-  const result = { ...estimate(data, subjectId), subjectId,
-    originalRating: previous?.originalRating ?? current, currentRating: current,
+  const result = { ...estimate(data, subjectId, type), subjectId, subjectType: type,
+    originalRating: previous ? previous.originalRating : current, currentRating: current,
     lastPublishedRating: previous?.lastPublishedRating ?? null,
     model: data.config.model, modelVersion: 1 as const, calibration: 'fixed-ordinal-v1' as const,
     updatedAt: new Date().toISOString() };
@@ -82,9 +82,10 @@ export function recordEstimate(data: Data, subjectId: number): void {
 }
 
 export function recompute(data: Data): void {
-  for (const id of new Set([...data.records.map(r => r.subjectId), ...data.comparisons.map(c => c.target)])) recordEstimate(data, id);
+  const targets = new Map([...data.records.map(r => [r.subjectId, r.subjectType] as const), ...data.comparisons.map(c => [c.target, c.subjectType] as const)]);
+  for (const [id, type] of targets) recordEstimate(data, id, type);
 }
 
-export function newComparison(target: number, reference: number, outcome: Comparison['outcome']): Comparison {
-  return { id: crypto.randomUUID(), target, reference, outcome, at: new Date().toISOString() };
+export function newComparison(target: number, reference: number, outcome: Comparison['outcome'], subjectType: SubjectType): Comparison {
+  return { id: crypto.randomUUID(), target, reference, subjectType, outcome, at: new Date().toISOString() };
 }
