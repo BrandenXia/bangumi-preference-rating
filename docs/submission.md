@@ -4,7 +4,7 @@ Component: [个性化评分](https://bgm.tv/dev/app/7267)
 
 Development version: [0.1.0](https://bgm.tv/dev/app/7267/gadget/3887)
 
-The script is saved as an unreviewed developer version and enabled for the author. It has **not** been submitted for public review. Use the component page's **提交审核** button when ready to submit.
+The updated version is enabled for the author and submitted for public review (审核中). Preference scoring appears below the default rating chart in the collection panel; the floating window follows Bangumi typography and theme colors.
 
 Build with `npm ci && npm run build`. Paste the complete readable `dist/bangumi-preference-rating.js` into the **脚本** field; the **样式** field stays empty because the script includes its scoped CSS. There are no third-party runtime libraries or remote script imports. The component's cross-origin API checkbox is enabled for its requests to `api.bgm.tv`.
 

@@ -41,11 +41,12 @@ function start(): void {
       if (!subjectId) return;
       const subject = subjectFromPage(Number(subjectId)) ?? await getSubject(Number(subjectId));
       if (!subject || stamp !== generation) return;
-      const host = document.querySelector('#columnSubjectHomeA, #columnSubjectHome') ?? document.querySelector('h1.nameSingle')?.parentElement;
+      const host = document.querySelector('#panelInterestWrapper [rel="v:rating"]');
       if (!host) return;
       const entry = document.createElement('div'); entry.id = 'bpr-entry';
-      const button = document.createElement('button'); button.textContent = '偏好评分';
-      const summary = document.createElement('span');
+      const button = document.createElement('button'); button.textContent = '开始比较'; button.className = 'chiiBtn';
+      const heading = document.createElement('h3'); heading.textContent = '偏好评分';
+      const summary = document.createElement('p'); summary.className = 'tip';
       async function refreshLabel(): Promise<void> {
         try {
           const currentData = await load(user.id); selectedModel = currentData.config.model;
@@ -54,16 +55,16 @@ function start(): void {
         } catch { summary.textContent = '本地数据读取失败'; }
       }
       button.onclick = () => void openPanel(user, subject, () => void refreshLabel());
-      entry.append(button, summary); host.prepend(entry); void refreshLabel();
+      entry.append(heading, summary, button); host.after(entry); void refreshLabel();
     } catch (error) {
       // Visible retry on the subject page without silently overwriting storage.
       if (stamp !== generation || !subjectId) return;
-      const host = document.querySelector('#columnSubjectHomeA, #columnSubjectHome');
+      const host = document.querySelector('#panelInterestWrapper [rel="v:rating"]');
       if (!host) return;
       const entry = document.createElement('div'); entry.id = 'bpr-entry';
       const message = document.createElement('span'); message.textContent = error instanceof Error ? error.message : '偏好评分初始化失败。';
-      const retry = document.createElement('button'); retry.textContent = '重试'; retry.onclick = () => { lastKey = ''; void mount(); };
-      entry.append(message, retry); host.prepend(entry);
+      const retry = document.createElement('button'); retry.textContent = '重试'; retry.className = 'chiiBtn'; retry.onclick = () => { lastKey = ''; void mount(); };
+      entry.append(message, retry); host.after(entry);
     }
   }
 
