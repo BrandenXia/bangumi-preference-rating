@@ -30,3 +30,5 @@ Backup schema 2 adds categories; schema 1 anime-only backups migrate automatical
 ## Verification
 
 Four core tests cover the rating threshold, per-category isolation, both models, calibration order, skips/ties, backup validation/migration and API pagination. Typecheck and bundle build run separately. `tests/preview.html` is an offline mock Bangumi page for manual browser checks only; it is not an application entry point or included in the build. Serve the repository locally after building and open that fixture to check the floating dialog. The mock uses a disposable user ID and blocks actual network requests.
+
+The local browser check verified the eligibility screen, paginated imports, separate pool counts, comparison persistence after reload, unchanged score on skip, undo, and model-change preview/confirmation. File download/upload interaction and actual native installation remain unverified. Confirmations stay inside the floating dialog rather than relying on native browser alerts.

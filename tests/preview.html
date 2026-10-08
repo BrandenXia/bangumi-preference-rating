@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>偏好评分 · 本地预览</title>
+<style>
+  body { margin: 0; color: #403440; background: #f9f7f8; font: 15px/1.8 system-ui; }
+  main { max-width: 960px; margin: 60px auto; padding: 32px; border: 1px solid #e6dce3; border-radius: 12px; background: white; }
+  .label { font-size: 12px; color: #967488; }
+</style>
+<div id="dock" hidden><a href="/user/preview">Fixture identity</a></div>
+<main><p class="label">本地演示 · 模拟数据，不访问 Bangumi</p><h1 class="nameSingle">星际漫游</h1><section id="columnSubjectHome"></section></main>
+<script>
+  history.replaceState({}, '', '/subject/9000');
+  const names = ['春日来信', '银河之旅', '雨后的车站', '夏夜航线', '远方的朋友', '山间日记', '深海之声', '彼方天空', '小镇时光', '风起之时'];
+  window.chiiLib = { ukagaka: { addGeneralConfig(config) { window.previewConfig = config; } } };
+  window.fetch = async url => {
+    const path = new URL(url).pathname;
+    if (path === '/v0/users/preview') return new Response(JSON.stringify({ id: 999999, username: 'preview' }));
+    if (path === '/v0/subjects/9000') return new Response(JSON.stringify({ type: 2, name_cn: '星际漫游' }));
+    const offset = Number(new URL(url).searchParams.get('offset'));
+    return new Response(JSON.stringify({ total: 110, data: Array.from({ length: offset < 100 ? 50 : 10 }, (_, i) => ({
+      subject_id: offset + i + 1, subject_type: offset + i < 60 ? 2 : 4, rate: 4 + i % 6,
+      subject: { name_cn: names[i % names.length] + ' ' + (offset + i + 1), images: {} }
+    })) }));
+  };
+</script>
+<script src="/dist/bangumi-preference-rating.js"></script>
+</html>
