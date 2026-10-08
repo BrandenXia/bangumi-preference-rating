@@ -1,4 +1,7 @@
 import { build } from 'esbuild';
+import { readFile } from 'node:fs/promises';
+
+const { version } = JSON.parse(await readFile(new URL('./package.json', import.meta.url), 'utf8'));
 
 await build({
   entryPoints: ['src/main.ts'],
@@ -8,9 +11,9 @@ await build({
   target: 'es2022',
   loader: { '.css': 'text' },
   banner: { js: `// ==UserScript==
-// @name         Bangumi 偏好评分
+// @name         个性化评分
 // @namespace    bangumi-preference-rating
-// @version      0.1.0
+// @version      ${version}
 // @description  按类别比较条目，保存本地偏好评分
 // @grant        none
 // @match        *://bgm.tv/*

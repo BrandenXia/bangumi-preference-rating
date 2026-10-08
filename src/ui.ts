@@ -14,6 +14,7 @@ export async function openPanel(user: { id: number; username: string }, subject:
   const dialog = el('dialog'); dialog.id = 'bpr-dialog';
   const header = el('header');
   const heading = el('h2', subject ? '偏好评分' : '偏好评分 · 设置');
+  heading.id = 'bpr-heading'; dialog.setAttribute('aria-labelledby', heading.id);
   const close = el('button', '关闭', 'bpr-quiet'); close.type = 'button'; close.onclick = () => dialog.close();
   header.append(heading, close);
   const content = el('div', '正在读取本地数据…'); content.className = 'bpr-content';
@@ -26,6 +27,7 @@ export async function openPanel(user: { id: number; username: string }, subject:
   let budget = 8;
   let currentReference: number | null = null;
   let seen = new Set<number>();
+  let backupView: 'export' | 'import' | null = null;
 
   async function action(task: () => Promise<void>): Promise<void> {
     if (busy) return;
@@ -44,6 +46,7 @@ export async function openPanel(user: { id: number; username: string }, subject:
   }
 
   async function update(next: Data): Promise<void> {
+    if (!dialog.isConnected || loggedInUsername() !== user.username) throw new Error('窗口已关闭或登录用户已改变，操作已取消。');
     await save(next); data = next; changed();
   }
 
@@ -66,9 +69,43 @@ export async function openPanel(user: { id: number; username: string }, subject:
   }
 
   async function refresh(): Promise<void> {
-    const anchors = await getAnchors(user.username, n => { status.textContent = `正在读取公开评分：${n} 部`; });
+    const anchors = await getAnchors(user.username, n => { status.textContent = `正在读取公开评分：${n} 个条目`; });
     const next = structuredClone(data); next.anchors = anchors; next.importedAt = new Date().toISOString();
     recompute(next); await update(next); currentReference = null;
+  }
+
+  async function restore(text: string): Promise<void> {
+    if (text.length > 20 * 1024 * 1024) throw new Error('备份不能超过 20 MB。');
+    const next = parseBackup(JSON.parse(text), user.id); recompute(next);
+    if (!await confirmLocal(`用备份替换当前本地数据？备份包含 ${next.anchors.length} 个评分、${next.comparisons.length} 次比较。建议先导出当前数据。`)) return;
+    next.revision = data.revision; await update(next); seen = new Set(); currentReference = null; backupView = null;
+  }
+
+  function renderBackup(): void {
+    const exporting = backupView === 'export';
+    content.append(el('p', exporting ? '复制下面的 JSON 作为备份，或下载文件。' : '粘贴备份 JSON，或选择备份文件。导入前会确认替换。'));
+    const label = el('label', exporting ? '备份 JSON' : '待导入 JSON');
+    const text = el('textarea'); text.rows = 8; text.spellcheck = false; text.readOnly = exporting;
+    text.value = exporting ? JSON.stringify(data, null, 2) : ''; label.append(text); content.append(label);
+    const tools = el('div', '', 'bpr-actions');
+    if (exporting) {
+      const select = el('button', '选中全部'); select.onclick = () => { text.focus(); text.select(); };
+      tools.append(select, button('下载 JSON', async () => {
+        const url = URL.createObjectURL(new Blob([text.value], { type: 'application/json' }));
+        const link = el('a'); link.href = url; link.download = `bangumi-preferences-${user.id}.json`; link.hidden = true;
+        dialog.append(link); link.click(); link.remove(); setTimeout(() => URL.revokeObjectURL(url), 10000);
+      }));
+    } else {
+      tools.append(button('导入粘贴内容', () => restore(text.value), 'bpr-primary'));
+      const input = el('input'); input.type = 'file'; input.accept = '.json,application/json'; input.hidden = true;
+      input.onchange = () => void action(async () => {
+        const file = input.files?.[0]; if (!file) return;
+        if (file.size > 20 * 1024 * 1024) throw new Error('备份不能超过 20 MB。');
+        await restore(await file.text());
+      });
+      const choose = el('button', '选择 JSON 文件'); choose.onclick = () => input.click(); tools.append(choose, input);
+    }
+    tools.append(button('返回设置', async () => { backupView = null; })); content.append(tools);
   }
 
   async function changeConfig(model: Model, shrinkage: number): Promise<void> {
@@ -97,23 +134,7 @@ export async function openPanel(user: { id: number; username: string }, subject:
     shrink.value = String(data.config.shrinkage); shrink.onchange = () => void action(() => changeConfig(data.config.model, Number(shrink.value)));
     shrinkLabel.append(shrink); content.append(shrinkLabel);
     const tools = el('div', '', 'bpr-actions');
-    tools.append(button('导出 JSON', async () => {
-      const url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }));
-      const link = el('a'); link.href = url; link.download = `bangumi-preferences-${user.id}.json`; link.click();
-      setTimeout(() => URL.revokeObjectURL(url), 1000);
-    }));
-    const input = el('input'); input.type = 'file'; input.accept = '.json,application/json'; input.hidden = true;
-    input.onchange = () => void action(async () => {
-      const file = input.files?.[0]; if (!file) return;
-      if (file.size > 20 * 1024 * 1024) throw new Error('备份不能超过 20 MB。');
-      const next = parseBackup(JSON.parse(await file.text()), user.id);
-      recompute(next);
-      if (!await confirmLocal(`用备份替换当前本地数据？备份包含 ${next.anchors.length} 部评分、${next.comparisons.length} 次比较。建议先导出当前数据。`)) return;
-      next.revision = data.revision; await update(next); seen = new Set(); currentReference = null;
-    });
-    const importButton = el('button', '导入 JSON'); importButton.type = 'button';
-    importButton.onclick = () => input.click();
-    tools.append(importButton, input);
+    tools.append(button('导出 JSON', async () => { backupView = 'export'; }), button('导入 JSON', async () => { backupView = 'import'; }));
     tools.append(button('清除本地数据', async () => {
       if (!await confirmLocal('清除当前用户在此域名的全部偏好数据？建议先导出备份。')) return;
       const next: Data = { ...data, anchors: [], comparisons: [], records: [], importedAt: null };
@@ -129,6 +150,7 @@ export async function openPanel(user: { id: number; username: string }, subject:
     const focus = document.activeElement;
     const restoreFocus = focus instanceof HTMLElement && content.contains(focus) ? focus.textContent : null;
     content.replaceChildren();
+    if (backupView) { renderBackup(); return; }
     if (settings) { renderSettings(); return; }
     if (!subject) return;
     const pool = data.anchors.filter(a => a.type === subject.type);
@@ -144,11 +166,11 @@ export async function openPanel(user: { id: number; username: string }, subject:
     const old = data.records.find(r => r.subjectId === subject.id)?.originalRating;
     const current = data.anchors.find(a => a.id === subject.id)?.rate;
     const score = el('div', '', 'bpr-score');
-    score.append(el('strong', result.score.toFixed(2)), el('span', '初步建议 · 本地评分'));
+    score.append(el('strong', result.useful >= 3 ? result.score.toFixed(2) : '—'), el('span', result.useful >= 3 ? '初步建议 · 本地评分' : `再比较 ${3 - result.useful} 次查看初步建议`));
     content.append(score);
-    content.append(el('p', `建议整数 ${result.recommended} · ${result.useful} 次有效比较 · 公开评分 ${current ?? '未评分'}${old != null && old !== current ? `（最初 ${old}）` : ''}`, 'bpr-muted'));
-    if (result.range) content.append(el('p', `模型敏感性范围 ${result.range[0].toFixed(2)}–${result.range[1].toFixed(2)}，不是校准后的置信区间。`, 'bpr-muted'));
-    else content.append(el('p', 'Elo 不提供不确定性区间；分数仍为初步建议。', 'bpr-muted'));
+    content.append(el('p', `${result.useful >= 3 ? `建议整数 ${result.recommended} · ` : ''}${result.useful} 次有效比较 · 公开评分 ${current ?? '未评分'}${old != null && old !== current ? `（最初 ${old}）` : ''}`, 'bpr-muted'));
+    if (result.useful >= 3 && result.range) content.append(el('p', `模型敏感性范围 ${result.range[0].toFixed(2)}–${result.range[1].toFixed(2)}，不是校准后的置信区间。`, 'bpr-muted'));
+    else if (result.useful >= 3) content.append(el('p', 'Elo 不提供不确定性区间；分数仍为初步建议。', 'bpr-muted'));
     if (new Set(pool.map(a => a.rate)).size < 3) content.append(el('p', '原评分较集中，绝对分数参考价值有限。', 'bpr-muted'));
     const candidate = currentReference ? pool.find(a => a.id === currentReference) : chooseReference(pool, subject.id, result.strength, seen);
     if (result.useful < budget && candidate) {
@@ -198,8 +220,7 @@ export async function openPanel(user: { id: number; username: string }, subject:
       seen.clear(); currentReference = null; budget = 8;
     }, 'bpr-quiet'));
     content.append(actions);
-    const publish = el('button', '在线发布尚未接入'); publish.disabled = true; publish.title = '可在 Bangumi 原有评分控件中手动填写建议整数。';
-    content.append(publish, el('p', '每次比较立即保存。保留原评分可直接关闭；整数建议请手动填写到 Bangumi 原有评分控件。', 'bpr-muted'));
+    content.append(el('p', '每次比较立即保存。保留原评分可直接关闭；整数建议请手动填写到 Bangumi 原有评分控件。', 'bpr-muted'));
     if (restoreFocus) [...content.querySelectorAll('button')].find(b => b.textContent === restoreFocus)?.focus();
   }
 

@@ -28,6 +28,7 @@
 #bpr-dialog .bpr-actions { display: flex; flex-wrap: wrap; gap: 6px; margin: 18px 0; }
 #bpr-dialog label { display: block; margin: 18px 0; font-weight: 600; }
 #bpr-dialog select { display: block; width: 100%; margin-top: 6px; padding: 8px; border: 1px solid #dcd1d9; border-radius: 6px; background: #fff; color: #302832; font: inherit; }
+#bpr-dialog textarea { display: block; width: 100%; padding: 10px; border: 1px solid #dcd1d9; border-radius: 6px; resize: vertical; font: 12px/1.5 monospace; background: #fff; color: #302832; }
 #bpr-dialog details { margin: 16px 0; font-size: 12px; }
 #bpr-dialog summary { cursor: pointer; }
 #bpr-dialog .bpr-status { margin: 0; padding: 0 24px 16px; color: #9b3b58; font-size: 13px; }

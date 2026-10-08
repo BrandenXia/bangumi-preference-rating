@@ -1,5 +1,5 @@
 import styles from './styles.css';
-import { getSubject, getUser, loggedInUsername } from './api.ts';
+import { getSubject, getUser, loggedInUsername, subjectFromPage } from './api.ts';
 import { load } from './storage.ts';
 import { openPanel } from './ui.ts';
 
@@ -39,9 +39,9 @@ function start(): void {
       if (stamp !== generation) return;
       registerSettings();
       if (!subjectId) return;
-      const subject = await getSubject(Number(subjectId));
+      const subject = subjectFromPage(Number(subjectId)) ?? await getSubject(Number(subjectId));
       if (!subject || stamp !== generation) return;
-      const host = document.querySelector('#columnSubjectHome') ?? document.querySelector('h1.nameSingle')?.parentElement;
+      const host = document.querySelector('#columnSubjectHomeA, #columnSubjectHome') ?? document.querySelector('h1.nameSingle')?.parentElement;
       if (!host) return;
       const entry = document.createElement('div'); entry.id = 'bpr-entry';
       const button = document.createElement('button'); button.textContent = '偏好评分';
@@ -50,7 +50,7 @@ function start(): void {
         try {
           const currentData = await load(user.id); selectedModel = currentData.config.model;
           const record = currentData.records.find(r => r.subjectId === subject!.id);
-          summary.textContent = record ? `${record.score.toFixed(2)} · 初步建议` : '比较几个条目，找到你的评分';
+          summary.textContent = record ? record.useful >= 3 ? `${record.score.toFixed(2)} · 初步建议` : `${record.useful} 次比较 · 继续评分` : '比较几个条目，找到你的评分';
         } catch { summary.textContent = '本地数据读取失败'; }
       }
       button.onclick = () => void openPanel(user, subject, () => void refreshLabel());
@@ -58,7 +58,7 @@ function start(): void {
     } catch (error) {
       // Visible retry on the subject page without silently overwriting storage.
       if (stamp !== generation || !subjectId) return;
-      const host = document.querySelector('#columnSubjectHome');
+      const host = document.querySelector('#columnSubjectHomeA, #columnSubjectHome');
       if (!host) return;
       const entry = document.createElement('div'); entry.id = 'bpr-entry';
       const message = document.createElement('span'); message.textContent = error instanceof Error ? error.message : '偏好评分初始化失败。';

@@ -11,9 +11,15 @@ async function get(path: string): Promise<any> {
 
 export function loggedInUsername(root: ParentNode = document): string | null {
   // Only authenticated navigation, never arbitrary profile/comment links.
-  const link = root.querySelector<HTMLAnchorElement>('#dock a[href^="/user/"], #headerNeue2 .idBadgerNeue a.avatar[href^="/user/"], #headerNeue2 .idBadger a.avatar[href^="/user/"]');
-  const match = link?.getAttribute('href')?.match(/^\/user\/([^/?#]+)\/?$/);
-  return match ? decodeURIComponent(match[1]) : null;
+  const link = root.querySelector<HTMLAnchorElement>('#dock a[href*="/user/"], #headerNeue2 .idBadgerNeue a[href*="/user/"], #headerNeue2 .idBadger a.avatar[href*="/user/"]');
+  const href = link?.getAttribute('href');
+  if (!href) return null;
+  try {
+    const url = new URL(href, 'https://bgm.tv');
+    if (!['bgm.tv', 'bangumi.tv', 'chii.in'].includes(url.hostname)) return null;
+    const match = url.pathname.match(/^\/user\/([^/?#]+)\/?$/);
+    return match ? decodeURIComponent(match[1]) : null;
+  } catch { return null; }
 }
 
 export async function getUser(username: string): Promise<{ id: number; username: string }> {
@@ -26,6 +32,17 @@ export async function getSubject(id: number): Promise<Subject | null> {
   const subject = await get(`/subjects/${id}`);
   if (!validType(subject.type)) return null;
   return { id, type: subject.type, title: subject.name_cn || subject.name || `条目 #${id}`, cover: safeCover(subject.images?.common) };
+}
+
+export function subjectFromPage(id: number, root: ParentNode = document): Subject | null {
+  const heading = root.querySelector('h1.nameSingle a');
+  const category = root.querySelector('#navMenuNeue a.focus')?.getAttribute('href');
+  if (!heading || !category) return null;
+  const types: { [path: string]: Subject['type'] } = { '/book': 1, '/anime': 2, '/music': 3, '/game': 4, '/real': 6 };
+  const type = types[new URL(category, 'https://bgm.tv').pathname];
+  if (!type) return null;
+  return { id, type, title: heading.getAttribute('title') || heading.textContent?.trim() || `条目 #${id}`,
+    cover: safeCover(root.querySelector('#bangumiInfo img.cover')?.getAttribute('src')) };
 }
 
 export async function getAnchors(username: string, progress: (n: number) => void = () => {}): Promise<Anchor[]> {

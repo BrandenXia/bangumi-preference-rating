@@ -2,11 +2,20 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { emptyData, eligible, parseBackup } from '../src/data.ts';
 import { anchorStrength, calibrate, chooseReference, estimate, newComparison, recordEstimate, recompute } from '../src/model.ts';
-import { getAnchors } from '../src/api.ts';
+import { getAnchors, loggedInUsername, subjectFromPage } from '../src/api.ts';
 
 const anchors = (count: number) => Array.from({ length: count }, (_, i) => ({ id: i + 1, type: 2 as const, rate: 1 + i % 10, title: `Anime ${i}`, cover: '' }));
 
 test('eligibility counts distinct numeric ratings, including the 49/50 boundary', () => {
+  const navigation = (href: string | null) => ({ querySelector: () => href === null ? null : { getAttribute: () => href } }) as unknown as ParentNode;
+  assert.equal(loggedInUsername(navigation('https://bgm.tv/user/123')), '123');
+  assert.equal(loggedInUsername(navigation('/user/example')), 'example');
+  assert.equal(loggedInUsername(navigation('https://example.com/user/123')), null);
+  assert.equal(loggedInUsername(navigation(null)), null);
+  const page = { querySelector: (selector: string) => selector === 'h1.nameSingle a'
+    ? { getAttribute: () => '游戏标题', textContent: 'Game' }
+    : selector === '#navMenuNeue a.focus' ? { getAttribute: () => '/game' } : null } as unknown as ParentNode;
+  assert.equal(subjectFromPage(1, page)?.type, 4);
   assert.equal(eligible(anchors(49), 2), false);
   assert.equal(eligible([...anchors(49), anchors(1)[0], { ...anchors(1)[0], id: 100, rate: 0 }], 2), false);
   assert.equal(eligible(anchors(50), 2), true);
