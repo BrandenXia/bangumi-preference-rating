@@ -140,7 +140,7 @@ export async function openPanel(user: { id: number; username: string }, subject:
       const next: Data = { ...data, anchors: [], comparisons: [], records: [], importedAt: null };
       await update(next); seen.clear(); currentReference = null;
     }, 'bpr-quiet'));
-    content.append(tools, el('p', '数据保存在当前浏览器和域名下。没有云端同步；私密收藏与在线发布尚未接入。', 'bpr-muted'));
+    content.append(tools, el('p', '比较数据保存在当前浏览器和域名下。个人主页可逐项细化并选择批量更新评分；私密收藏不导入。', 'bpr-muted'));
     if (subject) content.append(button('返回比较', async () => { settings = false; }));
   }
 
@@ -188,7 +188,8 @@ export async function openPanel(user: { id: number; username: string }, subject:
         choices.append(button(label, async () => {
           const next = structuredClone(data);
           const comparison = newComparison(subject.id, candidate.id, outcome, subject.type);
-          next.comparisons.push(comparison); recordEstimate(next, subject.id, subject.type); await update(next);
+          next.comparisons.push(comparison); recordEstimate(next, subject.id, subject.type);
+          recordEstimate(next, candidate.id, subject.type); await update(next);
           seen.add(candidate.id); currentReference = null;
         }, outcome === 'target' || outcome === 'reference' ? 'bpr-primary' : ''));
       }
@@ -198,25 +199,27 @@ export async function openPanel(user: { id: number; username: string }, subject:
       if (candidate) content.append(button('再比较 8 次', async () => { budget = result.useful + 8; }, 'bpr-primary'));
     }
     if (result.useful >= 3) {
-      const used = [...new Set(data.comparisons.filter(c => c.target === subject.id && c.outcome !== 'skip').map(c => c.reference))];
+      const used = [...new Set(data.comparisons.filter(c => (c.target === subject.id || c.reference === subject.id) && c.outcome !== 'skip')
+        .map(c => c.target === subject.id ? c.reference : c.target))];
       const details = el('details'); details.append(el('summary', `使用的参考（${used.length}）`));
       const list = el('ul');
       for (const id of used) list.append(el('li', data.anchors.find(a => a.id === id)?.title ?? `条目 #${id}（已不在公开评分中）`));
       details.append(list); content.append(details);
     }
     const actions = el('div', '', 'bpr-actions');
-    const last = data.comparisons.filter(c => c.target === subject.id).at(-1);
+    const last = data.comparisons.filter(c => c.target === subject.id || c.reference === subject.id).at(-1);
     const undo = button('撤销上次比较', async () => {
       if (!last) return;
       const next = structuredClone(data); next.comparisons = next.comparisons.filter(c => c.id !== last.id);
-      recordEstimate(next, subject.id, subject.type); await update(next);
-      seen.delete(last.reference); currentReference = last.reference;
+      recordEstimate(next, last.target, subject.type); recordEstimate(next, last.reference, subject.type); await update(next);
+      const peer = last.target === subject.id ? last.reference : last.target;
+      seen.delete(peer); currentReference = peer;
     }); undo.disabled = !last;
     actions.append(undo, button('设置与备份', async () => { settings = true; }));
     actions.append(button('删除此条目偏好数据', async () => {
       if (!await confirmLocal('删除此条目的本地比较历史和偏好评分？Bangumi 评分不变。')) return;
-      const next = structuredClone(data); next.comparisons = next.comparisons.filter(c => c.target !== subject.id);
-      next.records = next.records.filter(r => r.subjectId !== subject.id); await update(next);
+      const next = structuredClone(data); next.comparisons = next.comparisons.filter(c => c.target !== subject.id && c.reference !== subject.id);
+      next.records = next.records.filter(r => r.subjectId !== subject.id); recompute(next); await update(next);
       seen.clear(); currentReference = null; budget = 8;
     }, 'bpr-quiet'));
     content.append(actions);
@@ -227,7 +230,8 @@ export async function openPanel(user: { id: number; username: string }, subject:
   try {
     data = await load(user.id);
     if (!dialog.isConnected) return;
-    seen = new Set(data.comparisons.filter(c => c.target === subject?.id).map(c => c.reference));
+    seen = new Set(data.comparisons.filter(c => c.target === subject?.id || c.reference === subject?.id)
+      .map(c => c.target === subject?.id ? c.reference : c.target));
     render();
     if (requestedModel) void action(() => changeConfig(requestedModel, data.config.shrinkage));
   } catch (error) { content.textContent = error instanceof Error ? error.message : '本地数据无法读取。'; }

@@ -29,7 +29,14 @@ export function anchorStrength(rate: number): number {
 export function estimate(data: Data, subjectId: number, type: SubjectType): Estimate {
   const anchors = new Map(data.anchors.filter(a => a.type === type).map(a => [a.id, anchorStrength(a.rate)]));
   const prior = anchors.get(subjectId) ?? (anchors.size ? [...anchors.values()].reduce((a, b) => a + b, 0) / anchors.size : 0);
-  const observations = data.comparisons.filter(c => c.target === subjectId && c.subjectType === type && c.outcome !== 'skip' && anchors.has(c.reference));
+  // A choice refines both rated entries; store the event once and reverse its outcome
+  // when this entry appeared on the right. Unrated references remain unusable priors.
+  const observations = data.comparisons.filter(c => c.subjectType === type && c.outcome !== 'skip').flatMap(c => {
+    if (c.target === subjectId && anchors.has(c.reference)) return [c];
+    if (c.reference === subjectId && anchors.has(c.target)) return [{ ...c, reference: c.target,
+      outcome: c.outcome === 'target' ? 'reference' as const : c.outcome === 'reference' ? 'target' as const : c.outcome }];
+    return [];
+  });
   let theta = prior;
   let precision = data.config.shrinkage;
   if (data.config.model === 'elo') {
@@ -82,7 +89,8 @@ export function recordEstimate(data: Data, subjectId: number, type: SubjectType)
 }
 
 export function recompute(data: Data): void {
-  const targets = new Map([...data.records.map(r => [r.subjectId, r.subjectType] as const), ...data.comparisons.map(c => [c.target, c.subjectType] as const)]);
+  const targets = new Map([...data.records.map(r => [r.subjectId, r.subjectType] as const),
+    ...data.comparisons.flatMap(c => [[c.target, c.subjectType] as const, [c.reference, c.subjectType] as const])]);
   for (const [id, type] of targets) recordEstimate(data, id, type);
 }
 

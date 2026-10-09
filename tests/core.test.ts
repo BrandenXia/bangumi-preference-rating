@@ -85,3 +85,56 @@ test('public collection pagination filters types, removes zero ratings and dedup
     assert.equal(result.some(a => a.id === 1 || a.id === 99), false);
   } finally { globalThis.fetch = originalFetch; }
 });
+
+test('category refinement covers both sides, resumes without repeated pairs, and reviews only supported integer changes', async () => {
+  const { nextPoolPair, ratingChanges } = await import('../src/refinement.ts');
+  const data = emptyData(1); data.anchors = anchors(50);
+  const visited = new Set<number>(); const pairs = new Set<string>();
+  for (let i = 0; i < 300; i++) {
+    const pair = nextPoolPair(data, 2);
+    if (!pair) break;
+    const key = pair.map(a => a.id).sort((a, b) => a - b).join(':');
+    assert.equal(pairs.has(key), false); pairs.add(key);
+    visited.add(pair[0].id); visited.add(pair[1].id);
+    data.comparisons.push(newComparison(pair[0].id, pair[1].id, i === 0 ? 'skip' : 'target', 2));
+    for (const subject of pair) recordEstimate(data, subject.id, 2);
+  }
+  assert.equal(visited.size, 50);
+  assert.ok(data.anchors.every(a => estimate(data, a.id, 2).useful >= 3));
+  assert.equal(nextPoolPair(data, 2), null);
+  assert.equal(nextPoolPair(data, 4), null);
+  const changes = ratingChanges(data, 2);
+  assert.ok(changes.length > 0);
+  assert.ok(changes.every(c => c.to !== c.from && c.to === Math.round(c.score)));
+  const change = changes[0];
+  data.anchors.find(a => a.id === change.subject.id)!.rate = change.to;
+  assert.equal(ratingChanges(data, 2).some(c => c.subject.id === change.subject.id), false);
+  const bilateral = emptyData(1); bilateral.anchors = anchors(50).map(a => ({ ...a, rate: 6 }));
+  const original = estimate(bilateral, 1, 2).score;
+  bilateral.comparisons.push(newComparison(1, 2, 'target', 2));
+  assert.ok(estimate(bilateral, 1, 2).score > original);
+  assert.ok(estimate(bilateral, 2, 2).score < original);
+  assert.equal(ratingChanges(bilateral, 2).length, 0);
+});
+
+test('pair probabilities preserve contradictions, ties, skips and cyclic preferences', async () => {
+  const { pairProbabilities, nextPoolPair } = await import('../src/refinement.ts');
+  const data = emptyData(1); data.anchors = anchors(50);
+  data.comparisons = [newComparison(1, 2, 'target', 2), newComparison(2, 3, 'target', 2), newComparison(3, 1, 'target', 2),
+    newComparison(1, 2, 'reference', 2), newComparison(2, 1, 'tie', 2), newComparison(1, 2, 'skip', 2)];
+  const cell = pairProbabilities(data, 2, 1, 2);
+  assert.equal(cell.observed, 4);
+  assert.equal(cell.target + cell.reference + cell.tie + cell.skip, 1);
+  assert.equal(cell.target, cell.reference);
+  const reverse = pairProbabilities(data, 2, 2, 1);
+  assert.equal(reverse.target, cell.reference); assert.equal(reverse.reference, cell.target);
+  assert.equal(pairProbabilities(data, 4, 1, 2).observed, 0);
+  assert.ok(pairProbabilities(data, 2, 2, 3).target > pairProbabilities(data, 2, 2, 3).reference);
+  assert.ok(pairProbabilities(data, 2, 3, 1).target > pairProbabilities(data, 2, 3, 1).reference);
+  assert.equal(estimate(data, 1, 2).useful, 4);
+  // A later refinement round can reconsider previously observed pairs.
+  const full = emptyData(1); full.anchors = anchors(50);
+  for (let a = 1; a <= 50; a++) for (let b = a + 1; b <= 50; b++) full.comparisons.push(newComparison(a, b, 'skip', 2));
+  assert.equal(nextPoolPair(full, 2, 3), null);
+  assert.ok(nextPoolPair(full, 2, 6));
+});

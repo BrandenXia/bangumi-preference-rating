@@ -1,6 +1,6 @@
 {
   "name": "bangumi-preference-rating",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -12,5 +12,7 @@
     "esbuild": "^0.25.0",
     "typescript": "^5.9.0"
   },
-  "engines": { "node": ">=24" }
+  "engines": {
+    "node": ">=24"
+  }
 }

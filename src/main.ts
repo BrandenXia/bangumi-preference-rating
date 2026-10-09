@@ -2,6 +2,7 @@ import styles from './styles.css';
 import { getSubject, getUser, loggedInUsername, subjectFromPage } from './api.ts';
 import { load } from './storage.ts';
 import { openPanel } from './ui.ts';
+import { openRefinement } from './refinement-ui.ts';
 
 declare global {
   interface Window {
@@ -26,11 +27,13 @@ function start(): void {
   async function mount(): Promise<void> {
     const username = loggedInUsername();
     const subjectId = location.pathname.match(/^\/subject\/(\d+)\/?$/)?.[1];
-    const key = `${username}:${subjectId}`;
+    const profile = location.pathname.match(/^\/user\/([^/]+)\/?$/)?.[1];
+    const key = `${username}:${location.pathname}`;
     if (key === lastKey) return;
     lastKey = key;
     const stamp = ++generation;
     document.querySelector('#bpr-entry')?.remove();
+    document.querySelector('#bpr-home-entry')?.remove();
     document.querySelector<HTMLDialogElement>('#bpr-dialog')?.close();
     if (!username) return;
     try {
@@ -38,6 +41,22 @@ function start(): void {
       const data = await load(user.id); selectedModel = data.config.model;
       if (stamp !== generation) return;
       registerSettings();
+      if (profile) {
+        const profileName = decodeURIComponent(profile);
+        const own = profileName === username || profileName === String(user.id) || (await getUser(profileName)).id === user.id;
+        if (!own || stamp !== generation) return;
+        const statistics = document.querySelector('#userStatsContainers')?.closest('.userStats');
+        const host = statistics ?? document.querySelector('#columnB');
+        if (!host) return;
+        const entry = document.createElement('div'); entry.id = 'bpr-home-entry'; entry.className = 'menu_inner';
+        const heading = document.createElement('h2'); heading.textContent = '偏好评分';
+        const text = document.createElement('p'); text.className = 'tip'; text.textContent = '按类别逐项细化，检查变化后批量更新评分。';
+        const button = document.createElement('button'); button.textContent = '逐项细化评分'; button.className = 'chiiBtn';
+        button.onclick = () => void openRefinement(user);
+        entry.append(heading, text, button);
+        if (statistics) statistics.after(entry); else host.prepend(entry);
+        return;
+      }
       if (!subjectId) return;
       const subject = subjectFromPage(Number(subjectId)) ?? await getSubject(Number(subjectId));
       if (!subject || stamp !== generation) return;

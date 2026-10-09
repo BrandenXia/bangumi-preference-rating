@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="light">
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>逐项细化评分 · 本地验证</title>
+<style>
+body { font:12px/1.5 'Helvetica Neue',Arial,sans-serif; background:#fff; color:#333; margin:0; --primary-color:#f09199; --se-link:#0084b4; }
+nav { padding:15px; border-bottom:1px solid #eee; color:#f09199; font-size:22px; }
+main { max-width:980px; margin:30px auto; display:grid; grid-template-columns:1fr 300px; gap:30px; padding:15px; }
+.menu_inner { padding:15px; border:1px solid #eee; border-radius:10px; } .tip { color:#666; }
+#test-result { white-space:pre-wrap; } #scenario { display:block; margin:15px 0; }
+</style>
+<div id="dock" hidden><a href="https://bgm.tv/user/preview">Fixture user</a></div>
+<nav>bangumi · 本地模拟</nav>
+<main><section><h1>Preview 的时光机</h1><p>只使用模拟收藏与模拟更新，不连接 Bangumi。</p>
+<label>模拟更新情形<select id="scenario"><option value="ok">成功</option><option value="fail-second">第二条更新失败</option><option value="conflict">远端评分已改变</option><option value="account">登录用户已改变</option><option value="unconfirmed">服务器未保存评分</option></select></label>
+<a href="/tests/profile-preview.html?other=1">模拟其他用户主页</a> · <a href="/tests/profile-preview.html">模拟自己主页</a>
+<pre id="test-result">尚未写入</pre></section><aside id="columnB"><div class="menu_inner userStats"><h2>评分统计</h2><div id="userStatsContainers">动画 50 · 游戏 50 · 书籍 0</div></div></aside></main>
+<script>
+  history.replaceState({}, '', new URLSearchParams(location.search).has('other') ? '/user/other' : '/user/preview');
+  const names = ['春日来信','银河之旅','雨后的车站','夏夜航线','远方的朋友','山间日记','深海之声','彼方天空','小镇时光','风起之时'];
+  const subjects = Array.from({ length:100 }, (_, i) => ({ subject_id:i+1, subject_type:i<50?2:4, rate:6, subject:{name_cn:names[i%10]+' '+(i+1),images:{}} }));
+  const rates = new Map(subjects.map(s=>[s.subject_id,s.rate])); let writes=0;
+  window.chiiLib = { ukagaka:{ addGeneralConfig(){} } };
+  window.fetch = async (input, init = {}) => {
+    const url = new URL(input, location.href); const path = url.pathname;
+    const scenario = document.querySelector('#scenario').value;
+    if (path === '/v0/users/preview') return new Response(JSON.stringify({ id:999999 }));
+    if (path === '/v0/users/other') return new Response(JSON.stringify({ id:888888 }));
+    if (path === '/v0/users/preview/collections') {
+      const offset=Number(url.searchParams.get('offset'));
+      return new Response(JSON.stringify({total:100,data:subjects.slice(offset,offset+50).map(s=>({...s,rate:rates.get(s.subject_id)}))}));
+    }
+    if (path === '/') return new Response('<div id="dock"><a href="/user/'+(scenario==='account'?'other':'preview')+'">User</a></div>');
+    if (path.startsWith('/update/')) {
+      const id=Number(path.split('/')[2]); const rate=scenario==='conflict'?9:rates.get(id);
+      return new Response('<form id="collectBoxForm" action="/subject/'+id+'/interest/update?gh=fixture">'+
+        '<input name="interest" value="2"><input name="rating" value="'+rate+'"><input name="tags" value="keep tags"><textarea name="comment">keep comment</textarea>'+
+        '<input name="privacy" value="1"><input name="ep_status" value="12"><input name="vol_status" value="3"></form>');
+    }
+    if (/^\/subject\/\d+\/interest\/update$/.test(path) && init.method==='POST') {
+      if (scenario==='fail-second' && writes===1) return new Response('',{status:429});
+      const body=init.body; const preserved=body.get('tags')==='keep tags' && body.get('comment')==='keep comment' && body.get('interest')==='2' && body.get('privacy')==='1' && body.get('ep_status')==='12' && body.get('vol_status')==='3';
+      if (!preserved) throw new Error('Existing collection fields were changed');
+      if(scenario!=='unconfirmed') rates.set(Number(path.split('/')[2]),Number(body.get('rating'))); writes++;
+      document.querySelector('#test-result').textContent=JSON.stringify({writes,fieldsPreserved:preserved,lastSubject:Number(path.split('/')[2]),lastScore:Number(body.get('rating'))},null,2);
+      return new Response('OK');
+    }
+    throw new Error('Fixture blocks unrecognized request: '+path);
+  };
+</script>
+<script src="/dist/bangumi-preference-rating.js"></script>
+</html>
