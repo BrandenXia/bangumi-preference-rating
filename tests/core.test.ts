@@ -262,34 +262,43 @@ test('category scale floors at 4, reserves about 1/40 for 9, never assigns 10 an
   }
 });
 
-test('manual category order is exact, persists and supplies scores without fabricated comparisons', async () => {
+test('manual display order persists while both models keep learning from moves and comparisons', async () => {
   const { setManualOrder, rankedSubjects, ratingChanges } = await import('../src/refinement.ts');
-  const data = emptyData(1); data.anchors = anchors(300);
-  data.unrated = [{ id: 999, type: 2, title: 'Completed unscored', cover: '' }];
-  data.anchors.push(...anchors(50).map(a => ({ ...a, id: a.id + 1000, type: 4 as const })));
-  const ids = [999, ...anchors(300).map(a => a.id).reverse()];
   for (const model of ['bt', 'elo'] as const) {
-    data.config.model = model; setManualOrder(data, 2, ids);
-    const rows = rankedSubjects(data, 2);
-    assert.deepEqual(rows.map(r => r.subject.id), ids);
-    assert.ok(rows.every(r => r.result?.manual && r.result.score >= 4 && r.result.score <= 9 && r.result.range === null));
-    assert.equal(data.comparisons.length, 0);
-    assert.ok(rows.every(r => r.result!.useful === 0));
+    const data = emptyData(1); data.config.model = model; data.anchors = anchors(50).map(a => ({ ...a, rate: 7 }));
+    data.unrated = [{ id: 999, type: 2, title: 'Completed unscored', cover: '' }];
+    data.anchors.push(...anchors(50).map(a => ({ ...a, id: a.id + 1000, type: 4 as const })));
+    const ids = [999, ...anchors(50).map(a => a.id)];
+    const history = newComparison(1, 2, 'tie', 2); data.comparisons.push(history);
+    const baseline = rankedSubjects(data, 2).map(r => r.subject.id);
+    setManualOrder(data, 2, ids, baseline);
+    assert.deepEqual(rankedSubjects(data, 2).map(r => r.subject.id), ids);
+    assert.equal(data.comparisons.length, 51); // Only moving 999 across 50 rated entries.
+    assert.deepEqual(data.comparisons[0], history);
+    assert.equal(estimate(data, 999, 2).useful, 50);
     assert.ok(ratingChanges(data, 2).some(r => r.subject.id === 999 && r.from === null));
     assert.equal(ratingChanges(data, 4).length, 0);
     assert.deepEqual(parseBackup(JSON.parse(JSON.stringify(data)), 1), data);
-    data.comparisons.push(newComparison(1, 300, 'target', 2)); recompute(data);
+    const previous = estimate(data, 1, 2);
+    data.comparisons.push(...Array.from({ length: 10 }, () => newComparison(1, 50, 'target', 2))); recompute(data);
+    const updated = estimate(data, 1, 2);
+    assert.ok(updated.strength > previous.strength);
+    assert.ok(updated.score > previous.score);
+    assert.equal(updated.useful, previous.useful + 10);
     assert.deepEqual(rankedSubjects(data, 2).map(r => r.subject.id), ids);
-    data.comparisons = [];
+    const modelRows = rankedSubjects(data, 2, false);
+    assert.ok(modelRows.filter(r => r.result).every((row, i, rows) => i === 0 || rows[i-1].result!.score >= row.result!.score));
+    assert.notDeepEqual(modelRows.map(r => r.subject.id), ids);
+    assert.deepEqual(data.manualOrders[0].subjects, ids); // Viewing the model never erases the order.
+    assert.equal(updated.range !== null, model === 'bt');
+    const count = data.comparisons.length; setManualOrder(data, 2, ids);
+    assert.equal(data.comparisons.length, count); // Re-saving unchanged order adds no evidence.
+    assert.throws(() => setManualOrder(data, 2, ids.slice(1)));
+    assert.throws(() => setManualOrder(data, 2, [1001, ...ids.slice(1)]));
+    assert.throws(() => setManualOrder(data, 2, [ids[1], ...ids.slice(1)]));
+    assert.throws(() => parseBackup({ ...data, manualOrders: [{ subjectType: 4, subjects: ids }] }, 1));
+    assert.throws(() => parseBackup({ ...data, manualOrders: [{ subjectType: 2, subjects: [1,1] }] }, 1));
+    assert.deepEqual(parseBackup({ ...data, manualOrders: undefined }, 1).manualOrders, []);
+    assert.ok(data.records.every(r => !r.manual));
   }
-  assert.throws(() => setManualOrder(data, 2, ids.slice(1)));
-  assert.throws(() => setManualOrder(data, 2, [1001, ...ids.slice(1)]));
-  assert.throws(() => setManualOrder(data, 2, [ids[1], ...ids.slice(1)]));
-  assert.throws(() => parseBackup({ ...data, manualOrders: [{ subjectType: 4, subjects: ids }] }, 1));
-  assert.throws(() => parseBackup({ ...data, manualOrders: [{ subjectType: 2, subjects: [1,1] }] }, 1));
-  const legacy = { ...data, manualOrders: undefined };
-  assert.deepEqual(parseBackup(legacy, 1).manualOrders, []);
-  data.manualOrders = []; recompute(data);
-  assert.ok(rankedSubjects(data, 2).every(r => r.result === null));
-  assert.ok(data.records.every(r => !r.manual));
 });

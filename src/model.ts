@@ -108,21 +108,16 @@ export function estimateCategory(data: Data, type: SubjectType, extraIds: number
     }
     return 1;
   };
-  const poolIds = new Set(pool);
-  const manualOrder = data.manualOrders.find(order => order.subjectType === type)?.subjects.filter(id => poolIds.has(id)) ?? [];
-  const manualPositions = new Map(manualOrder.map((id, i) => [id, i]));
   const scoreFor = (strength: number) => scoreAtPercentile(percentile(strength), data.config.spread);
   return new Map([...raw].map(([id, result]) => {
-    const manualPosition = manualPositions.get(id);
-    const manual = manualPosition !== undefined;
-    const score = manual ? scoreAtPercentile(1 - (manualPosition + 0.5) / manualOrder.length, data.config.spread) : scoreFor(result.strength);
+    const score = scoreFor(result.strength);
     // Rounding weights for the displayed suggestion, not posterior confidence.
     const probabilities = Array(10).fill(0) as number[];
     const lower = Math.floor(score);
     probabilities[lower - 1] = 1 - (score - lower);
     if (lower < 10) probabilities[lower] = score - lower;
-    return [id, { ...result, ...(manual ? { manual: true as const } : {}), score, probabilities, recommended: Math.round(score),
-      range: !manual && result.range ? [scoreFor(result.range[0]), scoreFor(result.range[1])] as [number, number] : null }];
+    return [id, { ...result, score, probabilities, recommended: Math.round(score),
+      range: result.range ? [scoreFor(result.range[0]), scoreFor(result.range[1])] as [number, number] : null }];
   }));
 }
 

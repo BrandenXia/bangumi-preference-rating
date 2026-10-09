@@ -2,7 +2,7 @@
 
 Component: [个性化评分](https://bgm.tv/dev/app/7267)
 
-Development version: [0.3.3](https://bangumi.tv/dev/app/7267/gadget/3887).
+Development version: [0.3.4](https://bangumi.tv/dev/app/7267/gadget/3887).
 
 The updated version is enabled for the author and submitted for public review (审核中). The own-profile refinement entry appears below rating statistics, and supports category comparisons and confirmed selected batch updates. Subject preference scoring appears below the default rating chart in the collection panel; the floating window follows Bangumi typography and theme colors.
 
@@ -33,3 +33,7 @@ The saved 0.3.2 bundle matches the local build and is submitted for review (审�
 Version 0.3.3 adds exact manual ranking with pointer/touch drag handles and keyboard movement. Users preview, save or cancel the whole category order, or restore model ranking. Saved order supplies position-based 4–9 suggestions, including unsupported completed entries, without fabricating comparisons. Selected and confirmed publication is unchanged; manual orders are included in backups.
 
 The saved 0.3.3 bundle matches the local build and is submitted for review (审核中). Mock checks verified dragging, keyboard moves, cancellation, save/reload, model restoration and matching review scores. Native dragging was verified in an unsaved preview and canceled; no real order, comparison or rating was saved during the release check.
+
+Version 0.3.4 retains exact manual display order while BT/Elo scoring stays active. Saving a changed arrangement adds preference observations only for crossed pairs, leaving prior contradictory choices intact. Manual and model views can be switched without erasing the saved order. Scores and batch suggestions again require three useful observations; manual positions no longer override model estimates.
+
+The saved 0.3.4 bundle matches the local build and is submitted for review (审核中). Core checks cover both models updating scores while preserving order. Mock checks verify view switching, a later continuous choice, reload persistence and model-based batch review. Native controls and updated explanation were verified without changing real preferences or ratings.

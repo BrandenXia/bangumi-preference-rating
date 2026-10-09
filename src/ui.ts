@@ -171,11 +171,11 @@ export async function openPanel(user: { id: number; username: string }, subject:
     const old = data.records.find(r => r.subjectId === subject.id)?.originalRating;
     const current = data.anchors.find(a => a.id === subject.id)?.rate;
     const score = el('div', '', 'bpr-score');
-    score.append(el('strong', (result.manual || result.useful >= 3) ? result.score.toFixed(2) : '—'), el('span', (result.manual || result.useful >= 3) ? result.manual ? '手动排序 · 本地评分' : '初步建议 · 本地评分' : `再比较 ${3 - result.useful} 次查看初步建议`));
+    score.append(el('strong', result.useful >= 3 ? result.score.toFixed(2) : '—'), el('span', result.useful >= 3 ? '初步建议 · 本地评分' : `再比较 ${3 - result.useful} 次查看初步建议`));
     content.append(score);
-    content.append(el('p', `${(result.manual || result.useful >= 3) ? `建议整数 ${result.recommended} · ` : ''}${result.useful} 次有效比较 · 公开评分 ${current ?? '未评分'}${old != null && old !== current ? `（最初 ${old}）` : ''}`, 'bpr-muted'));
-    if ((result.manual || result.useful >= 3) && result.range) content.append(el('p', `模型敏感性范围 ${result.range[0].toFixed(2)}–${result.range[1].toFixed(2)}，不是校准后的置信区间。`, 'bpr-muted'));
-    else if (!result.manual && result.useful >= 3) content.append(el('p', 'Elo 不提供不确定性区间；分数仍为初步建议。', 'bpr-muted'));
+    content.append(el('p', `${result.useful >= 3 ? `建议整数 ${result.recommended} · ` : ''}${result.useful} 次有效比较 · 公开评分 ${current ?? '未评分'}${old != null && old !== current ? `（最初 ${old}）` : ''}`, 'bpr-muted'));
+    if (result.useful >= 3 && result.range) content.append(el('p', `模型敏感性范围 ${result.range[0].toFixed(2)}–${result.range[1].toFixed(2)}，不是校准后的置信区间。`, 'bpr-muted'));
+    else if (result.useful >= 3) content.append(el('p', 'Elo 不提供不确定性区间；分数仍为初步建议。', 'bpr-muted'));
     if (new Set(pool.map(a => a.rate)).size < 3) content.append(el('p', '原评分较集中，绝对分数参考价值有限。', 'bpr-muted'));
     const candidate = currentReference ? pool.find(a => a.id === currentReference) : chooseReference(pool, subject.id, result.strength, seen);
     if (result.useful < budget && candidate) {
@@ -202,7 +202,7 @@ export async function openPanel(user: { id: number; username: string }, subject:
       content.append(el('p', candidate ? '本轮比较已完成，评分与比较历史已保存。你可以继续细化。' : '已比较完可用参考，刷新收藏后可继续。'));
       if (candidate) content.append(button('再比较 8 次', async () => { budget = result.useful + 8; }, 'bpr-primary'));
     }
-    if ((result.manual || result.useful >= 3)) {
+    if (result.useful >= 3) {
       const used = [...new Set(data.comparisons.filter(c => (c.target === subject.id || c.reference === subject.id) && c.outcome !== 'skip')
         .map(c => c.target === subject.id ? c.reference : c.target))];
       const details = el('details'); details.append(el('summary', `使用的参考（${used.length}）`));

@@ -36,6 +36,8 @@ export async function openRefinement(user: { id: number; username: string }, ini
   let stop = false;
   const selected = new Set<number>();
   let notice = '';
+  let rankingView: 'manual' | 'model' = 'manual';
+  let draftBase: number[] | undefined;
   let draftOrder: { subjectType: SubjectType; subjects: number[] } | null = null;
 
   function alive(): void {
@@ -137,31 +139,30 @@ export async function openRefinement(user: { id: number; username: string }, ini
     filters.append(label, spread); content.append(filters); spreadControl(spread, true);
     const display = draftOrder?.subjectType === type
       ? { ...data, manualOrders: [...data.manualOrders.filter(order => order.subjectType !== type), draftOrder] } : data;
-    const rows = rankedSubjects(display, type);
-    const manual = display.manualOrders.some(order => order.subjectType === type);
+    const rows = rankedSubjects(display, type, draftOrder !== null || rankingView === 'manual');
+    const manual = (draftOrder !== null || rankingView === 'manual') && display.manualOrders.some(order => order.subjectType === type);
     const canArrange = eligible(data.anchors, type);
-    content.append(el('p', '拖动 ↕ 或用方向键调整顺序（Home / End 到首尾）。保存后为整个列表生成 4–9 分建议，包括待比较条目；可恢复模型排序。', 'bpr-muted'));
+    content.append(el('p', '拖动 ↕ 或用方向键排列（Home / End 到首尾）。保存后保留你的顺序，跨越的条目形成偏好比较；模型评分仍持续更新，可能与手动顺序不同。', 'bpr-muted'));
     const orderActions = el('div', '', 'bpr-actions');
     const saveOrder = button('保存手动顺序', async () => {
       if (!draftOrder || draftOrder.subjectType !== type) return;
-      const next = structuredClone(data); setManualOrder(next, type, draftOrder.subjects);
+      const next = structuredClone(data); setManualOrder(next, type, draftOrder.subjects, draftBase);
       await persist(next); draftOrder = null; selected.clear(); notice = '已保存手动顺序；Bangumi 评分尚未更新。';
     }, true); saveOrder.disabled = !draftOrder || !canArrange;
     const cancelOrder = button('取消排列', async () => { draftOrder = null; }); cancelOrder.disabled = !draftOrder;
-    const modelOrder = button('恢复模型排序', async () => {
-      const next = structuredClone(data); next.manualOrders = next.manualOrders.filter(order => order.subjectType !== type);
-      recompute(next); await persist(next); draftOrder = null; selected.clear(); notice = '已恢复模型排序，比较历史保留。';
-    }); modelOrder.disabled = !data.manualOrders.some(order => order.subjectType === type);
+    const modelOrder = button(rankingView === 'manual' ? '查看模型排序' : '返回手动顺序', async () => {
+      rankingView = rankingView === 'manual' ? 'model' : 'manual'; notice = '';
+    }); modelOrder.disabled = draftOrder !== null || !data.manualOrders.some(order => order.subjectType === type);
     orderActions.append(saveOrder, cancelOrder, modelOrder); content.append(orderActions);
     if (draftOrder) content.append(el('p', '手动排列预览 · 尚未保存', 'bpr-subtitle'));
 
     const ranked = rows.filter(row => row.result);
-    content.append(el('p', `${categoryName[type]} · ${ranked.length}/${rows.length} 个已完成条目已有偏好评分，${manual ? '手动排序' : '模型排序'}，按未四舍五入的分数从高到低排列。模型同分同名次；未手动排序且不足 3 次有效比较的条目列在末尾。`, 'bpr-muted'));
+    content.append(el('p', `${categoryName[type]} · ${ranked.length}/${rows.length} 个已完成条目已有偏好评分，${manual ? '手动顺序（评分由模型计算）' : '按模型分数降序排列，同分同名次'}；不足 3 次有效比较的条目暂不显示评分。`, 'bpr-muted'));
     if (!eligible(data.anchors, type)) content.append(el('p', '此类别不足 50 个已评分且已完成的公开收藏，暂不能生成偏好排名。', 'bpr-muted'));
-    if (ranked.length) content.append(el('p', `当前分布：${ranked.at(-1)!.result!.score.toFixed(2)}–${ranked[0].result!.score.toFixed(2)}`, 'bpr-subtitle'));
+    if (ranked.length) content.append(el('p', `当前分布：${Math.min(...ranked.map(row => row.result!.score)).toFixed(2)}–${Math.max(...ranked.map(row => row.result!.score)).toFixed(2)}`, 'bpr-subtitle'));
     if (rows.length) {
       const table = el('table', '', 'bpr-review'); const head = el('tr');
-      for (const title of ['排列', '名次', '条目', '当前', '偏好评分', '有效比较']) head.append(el('th', title));
+      for (const title of ['排列', manual ? '顺序' : '名次', '条目', '当前', '偏好评分', '有效比较']) head.append(el('th', title));
       const thead = el('thead'); thead.append(head); table.append(thead); const body = el('tbody');
       const scroll = el('div', '', 'bpr-table-scroll bpr-ranking-table');
       function move(id: number, destination: number, reveal = false): void {
@@ -169,6 +170,8 @@ export async function openRefinement(user: { id: number; username: string }, ini
         const order = rows.map(row => row.subject.id); const from = order.indexOf(id);
         const to = Math.max(0, Math.min(order.length - 1, destination));
         if (from === to || from < 0) return;
+        if (!draftOrder) draftBase = [...order];
+        rankingView = 'manual';
         order.splice(from, 1); order.splice(to, 0, id);
         draftOrder = { subjectType: type, subjects: order };
         const scrollTop = scroll.scrollTop; const dialogTop = dialog.scrollTop;
@@ -267,7 +270,7 @@ export async function openRefinement(user: { id: number; username: string }, ini
   function renderCompare(): void {
     const pool = refinementSubjects(data, type);
     const done = [...estimateCategory(data, type).values()].filter(a => a.useful >= goal).length;
-    if (data.manualOrders.some(order => order.subjectType === type)) content.append(el('p', '当前使用手动顺序。新的比较仍会保存；在排名面板恢复模型排序后，它们才会改变排名与建议。', 'bpr-muted'));
+    if (data.manualOrders.some(order => order.subjectType === type)) content.append(el('p', '你的手动顺序会保留；每次比较仍会更新模型评分和建议。可在排名面板切换查看模型排序。', 'bpr-muted'));
     const paused = mode === 'continuous' && sessionChoices.size >= sessionLimit;
     content.append(el('p', mode === 'continuous'
       ? `${categoryName[type]} · 连续细化 · 本轮 ${sessionChoices.size}/${sessionLimit} 次选择`
@@ -323,7 +326,7 @@ export async function openRefinement(user: { id: number; username: string }, ini
     const ids = new Set(changes.map(c => c.subject.id));
     for (const id of selected) if (!ids.has(id)) selected.delete(id);
     content.append(el('h3', `${categoryName[type]} · ${changes.length} 个评分建议`));
-    content.append(el('p', '仅列出已保存手动顺序或至少有 3 次有效比较、且未评分或建议整数与当前公开评分不同的条目。两位小数是本地建议。'));
+    content.append(el('p', '仅列出至少有 3 次有效比较、且未评分或建议整数与当前公开评分不同的条目。两位小数是本地建议。'));
     if (notice) content.append(el('p', notice, 'bpr-result'));
     const actions = el('div', '', 'bpr-actions');
     const publish = button(`更新已选 ${selected.size} 个评分`, publishSelected, true); publish.disabled = selected.size === 0;
