@@ -60,6 +60,9 @@ test('backups isolate accounts, reject damaged values, and preserve raw history 
   assert.throws(() => parseBackup({ ...backup, comparisons: [{ ...backup.comparisons[0], target: 25 }] }, 1));
   assert.throws(() => parseBackup({ ...backup, records: [{ ...backup.records[0], score: null }] }, 1));
   assert.throws(() => parseBackup({ ...backup, comparisons: [{ ...backup.comparisons[0], subjectType: 4 }] }, 1));
+  const legacyScope = parseBackup({ ...backup, completedOnly: undefined }, 1);
+  assert.equal(legacyScope.anchors.length, 0);
+  assert.deepEqual(legacyScope.comparisons, data.comparisons);
   const old = { ...backup, version: 1, anchors: backup.anchors.map(({ type, ...a }) => a),
     comparisons: backup.comparisons.map(({ subjectType, ...c }) => c),
     records: backup.records.map(({ subjectType, ...r }) => r) };
@@ -73,10 +76,11 @@ test('public collection pagination filters types, keeps unscored subjects separa
   const originalFetch = globalThis.fetch;
   const pages: number[] = [];
   globalThis.fetch = async (url) => {
+    assert.equal(new URL(String(url)).searchParams.get('type'), '2');
     const offset = Number(new URL(String(url)).searchParams.get('offset')); pages.push(offset);
-    const rows = offset === 0 ? anchors(50).map(a => ({ subject_id: a.id, subject_type: 2, rate: a.rate }))
-      : [{ subject_id: 1, subject_type: 2, rate: 0 }, { subject_id: 99, subject_type: 5, rate: 8 }, { subject_id: 51, subject_type: 2, rate: 10 }];
-    return new Response(JSON.stringify({ total: 53, data: rows }));
+    const rows = offset === 0 ? anchors(50).map(a => ({ subject_id: a.id, subject_type: 2, type: 2, rate: a.rate }))
+      : [{ subject_id: 1, subject_type: 2, type: 2, rate: 0 }, { subject_id: 99, subject_type: 5, type: 2, rate: 8 }, { subject_id: 51, subject_type: 2, type: 2, rate: 10 }, ...[1,3,4,5].map(type => ({ subject_id: 60+type, subject_type: 2, type, rate: type === 1 ? 0 : 8 }))];
+    return new Response(JSON.stringify({ total: 57, data: rows }));
   };
   try {
     const result = await getCollections('test');
@@ -84,7 +88,7 @@ test('public collection pagination filters types, keeps unscored subjects separa
     assert.equal(result.anchors.length, 50);
     assert.equal(result.unrated.length, 1);
     assert.equal(result.unrated[0].id, 1);
-    assert.equal(result.anchors.some(a => a.id === 1 || a.id === 99), false);
+    assert.equal(result.anchors.some(a => a.id === 1 || a.id === 99 || a.id > 60), false);
   } finally { globalThis.fetch = originalFetch; }
 });
 

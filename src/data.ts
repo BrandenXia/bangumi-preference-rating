@@ -18,7 +18,7 @@ export interface Record extends Estimate {
   calibration: 'fixed-ordinal-v1'; updatedAt: string;
 }
 export interface Data {
-  version: 2; userId: number; revision: number; importedAt: string | null;
+  version: 2; completedOnly: true; userId: number; revision: number; importedAt: string | null;
   anchors: Anchor[]; unrated: Subject[]; comparisons: Comparison[]; records: Record[];
   config: { model: Model; shrinkage: number };
 }
@@ -27,7 +27,7 @@ export const validId = (n: unknown): n is number => Number.isSafeInteger(n) && N
 export const validRate = (n: unknown): n is number => Number.isInteger(n) && Number(n) >= 1 && Number(n) <= 10;
 export const eligible = (anchors: Anchor[], type: SubjectType) => new Set(anchors.filter(a => a.type === type && validId(a.id) && validRate(a.rate)).map(a => a.id)).size >= 50;
 export const emptyData = (userId: number): Data => ({
-  version: 2, userId, revision: 0, importedAt: null, anchors: [], unrated: [], comparisons: [], records: [],
+  version: 2, completedOnly: true, userId, revision: 0, importedAt: null, anchors: [], unrated: [], comparisons: [], records: [],
   config: { model: 'bt', shrinkage: 1 },
 });
 
@@ -97,5 +97,8 @@ export function parseBackup(value: unknown, userId: number): Data {
       probabilities: [...r.probabilities], model: r.model, modelVersion: 1,
       calibration: 'fixed-ordinal-v1', updatedAt: r.updatedAt };
   });
+  // Older imports included every status. Keep history but require a fresh
+  // completed-only import before using those collections as scoring inputs.
+  if (v.completedOnly !== true) { out.anchors = []; out.unrated = []; out.importedAt = null; }
   return out;
 }

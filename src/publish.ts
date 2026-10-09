@@ -36,6 +36,7 @@ export async function publishRating(username: string, id: number, expected: numb
   if (!validId(id) || (expected !== null && !validRate(expected)) || !validRate(rating)) throw new Error('评分参数无效。');
   await assertSession(username);
   const before = await collectionForm(id);
+  if (before.fields.get('interest') !== '2') throw new Error('条目已不再是完成状态，已停止更新；请刷新收藏。');
   const current = Number(before.fields.get('rating'));
   if (current === rating) return; // A previous timed-out attempt may have succeeded.
   if (current !== (expected ?? 0)) throw new Error(`当前评分已从 ${expected ?? '未评分'} 变为 ${current || '未评分'}，请刷新公开评分后重新检查。`);

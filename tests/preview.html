@@ -20,7 +20,7 @@
     if (path === '/v0/subjects/9000') return new Response(JSON.stringify({ type: 2, name_cn: '星际漫游' }));
     const offset = Number(new URL(url).searchParams.get('offset'));
     return new Response(JSON.stringify({ total: 110, data: Array.from({ length: offset < 100 ? 50 : 10 }, (_, i) => ({
-      subject_id: offset + i + 1, subject_type: offset + i < 60 ? 2 : 4, rate: 4 + i % 6,
+      subject_id: offset + i === 0 ? 9000 : offset + i + 1, subject_type: offset + i < 60 ? 2 : 4, type: 2, rate: 4 + i % 6,
       subject: { name_cn: names[i % names.length] + ' ' + (offset + i + 1), images: {} }
     })) }));
   };

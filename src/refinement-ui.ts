@@ -109,7 +109,7 @@ export async function openRefinement(user: { id: number; username: string }): Pr
   }
 
   function renderCategory(): void {
-    content.append(el('p', '选择一个类别，依次比较已评分与未评分收藏。未评分条目与已评分条目比较，以估计首次评分，进度自动保存在本地。'));
+    content.append(el('p', '选择一个类别，依次比较已完成的收藏（已评分或未评分）。未评分条目与已评分条目比较，以估计首次评分，进度自动保存在本地。'));
     const label = el('label', '类别'); const select = el('select');
     for (const [id, name] of Object.entries(categoryName)) {
       const count = data.anchors.filter(a => a.type === Number(id)).length;
@@ -120,7 +120,7 @@ export async function openRefinement(user: { id: number; username: string }): Pr
     label.append(select); content.append(label);
     const pool = refinementSubjects(data, type);
     const ready = pool.filter(a => estimate(data, a.id, type).useful >= 3).length;
-    content.append(el('p', `${ready}/${pool.length} 个条目已有至少 3 次有效比较。各类别独立，需要至少 50 个已评分公开收藏。`, 'bpr-muted'));
+    content.append(el('p', `${ready}/${pool.length} 个条目已有至少 3 次有效比较。各类别独立，需要至少 50 个已评分且已完成的公开收藏。`, 'bpr-muted'));
     const actions = el('div', '', 'bpr-actions');
     const start = button('开始 / 继续逐项比较', async () => { begin(); }, true); start.disabled = !eligible(data.anchors, type);
     const review = button('查看评分变化', async () => { view = 'review'; }); review.disabled = !eligible(data.anchors, type);

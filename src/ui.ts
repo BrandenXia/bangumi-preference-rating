@@ -119,7 +119,7 @@ export async function openPanel(user: { id: number; username: string }, subject:
   function renderSettings(): void {
     content.append(el('p', `用户 ${user.username} · ${data.anchors.length} 个公开评分`, 'bpr-muted'));
     content.append(el('p', Object.entries(categoryName).map(([type, label]) => `${label} ${data.anchors.filter(a => a.type === Number(type)).length}/50`).join(' · '), 'bpr-muted'));
-    content.append(el('p', data.importedAt ? `最近刷新：${new Date(data.importedAt).toLocaleString()}。只包含公开收藏。` : '先导入公开评分，作为比较的参考。'));
+    content.append(el('p', data.importedAt ? `最近刷新：${new Date(data.importedAt).toLocaleString()}。只包含已完成的公开收藏。` : '先导入公开评分，作为比较的参考。'));
     content.append(button('刷新公开评分', refresh, 'bpr-primary'));
     const modelLabel = el('label', '评分算法'); const model = el('select');
     for (const [value, title] of [['bt', 'Bradley–Terry（MAP 近似）'], ['elo', 'Elo（顺序更新）']]) {
@@ -157,9 +157,14 @@ export async function openPanel(user: { id: number; username: string }, subject:
     content.append(el('p', `${subject.title} · ${categoryName[subject.type]}`, 'bpr-subtitle'));
     if (!eligible(data.anchors, subject.type)) {
       content.append(el('h3', `${pool.length}/50 个已评分${categoryName[subject.type]}条目`),
-        el('p', '每个类别需要至少 50 个有 1–10 分评分的不同条目。其他类别不计入此池；当前只读取公开收藏。'),
+        el('p', '每个类别需要至少 50 个有 1–10 分评分的不同条目。其他类别不计入此池；当前只读取已完成的公开收藏。'),
         button('导入 / 刷新公开评分', refresh, 'bpr-primary'),
         button('设置与备份', async () => { settings = true; }));
+      return;
+    }
+    if (![...data.anchors, ...data.unrated].some(a => a.id === subject.id && a.type === subject.type)) {
+      content.append(el('p', '仅为已完成的公开收藏评分。请先在 Bangumi 将此条目标为完成，再刷新收藏。'),
+        button('导入 / 刷新公开评分', refresh), button('设置与备份', async () => { settings = true; }));
       return;
     }
     const result = estimate(data, subject.id, subject.type);

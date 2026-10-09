@@ -12,14 +12,15 @@ main { max-width:980px; margin:30px auto; display:grid; grid-template-columns:1f
 <div id="dock" hidden><a href="https://bgm.tv/user/preview">Fixture user</a></div>
 <nav>bangumi · 本地模拟</nav>
 <main><section><h1>Preview 的时光机</h1><p>只使用模拟收藏与模拟更新，不连接 Bangumi。</p>
-<label>模拟更新情形<select id="scenario"><option value="ok">成功</option><option value="fail-second">第二条更新失败</option><option value="conflict">远端评分已改变</option><option value="account">登录用户已改变</option><option value="unconfirmed">服务器未保存评分</option></select></label>
+<label>模拟更新情形<select id="scenario"><option value="ok">成功</option><option value="fail-second">第二条更新失败</option><option value="conflict">远端评分已改变</option><option value="account">登录用户已改变</option><option value="incomplete">完成状态已改变</option><option value="unconfirmed">服务器未保存评分</option></select></label>
 <a href="/tests/profile-preview.html?other=1">模拟其他用户主页</a> · <a href="/tests/profile-preview.html">模拟自己主页</a>
 <pre id="test-result">尚未写入</pre></section><aside id="columnB"><div class="menu_inner userStats"><h2>评分统计</h2><div id="userStatsContainers">动画 50 · 游戏 50 · 书籍 0</div></div></aside></main>
 <script>
   history.replaceState({}, '', new URLSearchParams(location.search).has('other') ? '/user/other' : '/user/preview');
   const names = ['春日来信','银河之旅','雨后的车站','夏夜航线','远方的朋友','山间日记','深海之声','彼方天空','小镇时光','风起之时'];
-  const subjects = Array.from({ length:100 }, (_, i) => ({ subject_id:i+1, subject_type:i<50?2:4, rate:6, subject:{name_cn:names[i%10]+' '+(i+1),images:{}} }));
-  subjects.push(...[101,102].map(id=>({subject_id:id,subject_type:2,rate:0,subject:{name_cn:'未评分作品 '+id,images:{}}})));
+  const subjects = Array.from({ length:100 }, (_, i) => ({ subject_id:i+1, subject_type:i<50?2:4, type:2, rate:6, subject:{name_cn:names[i%10]+' '+(i+1),images:{}} }));
+  subjects.push(...[101,102].map(id=>({subject_id:id,subject_type:2,type:2,rate:0,subject:{name_cn:'未评分作品 '+id,images:{}}})));
+  subjects.push(...[1,3,4,5].map(type=>({subject_id:110+type,subject_type:2,type,rate:0,subject:{name_cn:'未完成作品 '+type,images:{}}})));
   const rates = new Map(subjects.map(s=>[s.subject_id,s.rate])); let writes=0;
   window.chiiLib = { ukagaka:{ addGeneralConfig(){} } };
   window.fetch = async (input, init = {}) => {
@@ -35,7 +36,7 @@ main { max-width:980px; margin:30px auto; display:grid; grid-template-columns:1f
     if (path.startsWith('/update/')) {
       const id=Number(path.split('/')[2]); const rate=scenario==='conflict'?9:rates.get(id);
       return new Response('<form id="collectBoxForm" action="/subject/'+id+'/interest/update?gh=fixture">'+
-        '<input name="interest" value="2">'+(rate ? '<input name="rating" value="'+rate+'">' : '<input type="radio" name="rating" value="1">')+'<input name="tags" value="keep tags"><textarea name="comment">keep comment</textarea>'+
+        '<input name="interest" value="'+(scenario==='incomplete'?'3':'2')+'">'+(rate ? '<input name="rating" value="'+rate+'">' : '<input type="radio" name="rating" value="1">')+'<input name="tags" value="keep tags"><textarea name="comment">keep comment</textarea>'+
         '<input name="privacy" value="1"><input name="ep_status" value="12"><input name="vol_status" value="3"></form>');
     }
     if (/^\/subject\/\d+\/interest\/update$/.test(path) && init.method==='POST') {
