@@ -1,6 +1,6 @@
 import { eligible } from './data.ts';
 import type { Anchor, Data, Subject, SubjectType, Estimate } from './data.ts';
-import { estimate } from './model.ts';
+import { estimateCategory } from './model.ts';
 
 export type PoolSubject = Subject & { rate: number | null };
 export function refinementSubjects(data: Data, type: SubjectType): PoolSubject[] {
@@ -10,7 +10,7 @@ export function refinementSubjects(data: Data, type: SubjectType): PoolSubject[]
 export function nextPoolPair(data: Data, type: SubjectType, goal = 3): [PoolSubject, Anchor] | null {
   const pool = refinementSubjects(data, type);
   if (!eligible(data.anchors, type)) return null;
-  const evidence = new Map(pool.map(a => [a.id, estimate(data, a.id, type)]));
+  const evidence = estimateCategory(data, type);
   const attempts = new Map(pool.map(a => [a.id, 0]));
   const seen = new Map<string, number>();
   const pairKey = (a: number, b: number) => `${Math.min(a, b)}:${Math.max(a, b)}`;
@@ -38,7 +38,7 @@ export function nextContinuousPair(data: Data, type: SubjectType): [PoolSubject,
   if (!eligible(data.anchors, type)) return null;
   const pool = refinementSubjects(data, type);
   const references = data.anchors.filter(a => a.type === type);
-  const evidence = new Map(pool.map(a => [a.id, estimate(data, a.id, type)]));
+  const evidence = estimateCategory(data, type);
   const density = new Map(pool.map(a => [a.id, pool.filter(b => Math.abs(evidence.get(a.id)!.score - evidence.get(b.id)!.score) <= 0.75).length]));
   const key = (a: number, b: number) => `${Math.min(a, b)}:${Math.max(a, b)}`;
   const history = data.comparisons.filter(c => c.subjectType === type);
@@ -90,8 +90,9 @@ export function ratingChanges(data: Data, type: SubjectType): RatingChange[] {
 
 export function rankedSubjects(data: Data, type: SubjectType): { subject: PoolSubject; result: Estimate | null; rank: number | null }[] {
   const ready = eligible(data.anchors, type);
+  const estimates = estimateCategory(data, type);
   const rows = refinementSubjects(data, type).map(subject => {
-    const result = estimate(data, subject.id, type);
+    const result = estimates.get(subject.id)!;
     return { subject, result: ready && result.useful >= 3 ? result : null, rank: null as number | null };
   }).sort((a, b) => Number(b.result !== null) - Number(a.result !== null) ||
     (b.result?.score ?? 0) - (a.result?.score ?? 0) || a.subject.id - b.subject.id);

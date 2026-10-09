@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { emptyData, eligible, parseBackup } from '../src/data.ts';
-import { anchorStrength, calibrate, chooseReference, estimate, newComparison, recordEstimate, recompute } from '../src/model.ts';
+import { anchorStrength, calibrate, chooseReference, estimate, newComparison, recordEstimate, recompute, estimateCategory, scoreAtPercentile } from '../src/model.ts';
 import { getCollections, loggedInUsername, subjectFromPage } from '../src/api.ts';
 
 const anchors = (count: number) => Array.from({ length: count }, (_, i) => ({ id: i + 1, type: 2 as const, rate: 1 + i % 10, title: `Anime ${i}`, cover: '' }));
@@ -181,11 +181,11 @@ test('category rankings sort refined scores, preserve ties and keep unsupported 
     }
     const history = structuredClone(data.comparisons);
     data.config.spread = 1;
-    const narrow = estimate(data, 1, 2).score - estimate(data, 2, 2).score;
+    const narrow = scoreAtPercentile(0.9, 1) - scoreAtPercentile(0.1, 1);
     const oldOrder = rankedSubjects(data, 2).filter(r => r.result).map(r => r.subject.id);
     data.config.spread = 3; recompute(data);
     const rows = rankedSubjects(data, 2); const supported = rows.filter(r => r.result);
-    assert.ok(estimate(data, 1, 2).score - estimate(data, 2, 2).score > narrow * 1.8);
+    assert.ok(scoreAtPercentile(0.9, 3) - scoreAtPercentile(0.1, 3) > narrow * 1.8);
     assert.deepEqual(supported.map(r => r.subject.id), oldOrder);
     assert.equal(rows.find(r => r.subject.id === 3)!.rank, rows.find(r => r.subject.id === 4)!.rank);
     assert.equal(rows.find(r => r.subject.id === 101)!.rank, null);
@@ -230,4 +230,34 @@ test('continuous refinement prefers clustered scores, resumes and revisits witho
   for (let a = 1; a <= 50; a++) for (let b = a + 1; b <= 50; b++) completed.comparisons.push(newComparison(a,b,'tie',2));
   assert.ok(nextContinuousPair(completed,2)); // Never requires increasing everyone's evidence quota.
   assert.deepEqual(before.comparisons, []);
+});
+
+
+test('category scale floors at 4, reserves about 1/40 for 9, never assigns 10 and preserves ties', () => {
+  for (const model of ['bt', 'elo'] as const) {
+    const data = emptyData(1); data.config.model = model;
+    data.anchors = anchors(300).map(a => ({ ...a, rate: 7 }));
+    // Distinct noisy preferences across a dense prior cluster, without inventing an order constraint.
+    data.comparisons = data.anchors.flatMap((a, i) => Array.from({ length: i % 150 }, () =>
+      newComparison(a.id, a.id <= 150 ? 300 : 1, a.id <= 150 ? 'target' : 'reference', 2)));
+    for (const spread of [1, 1.5, 2, 3] as const) {
+      data.config.spread = spread;
+      const scores = [...estimateCategory(data, 2).values()];
+      assert.ok(scores.every(r => r.score >= 4 && r.score <= 9 && r.recommended >= 4));
+      assert.ok(scores.filter(r => r.recommended === 9).length >= 6);
+      assert.ok(scores.filter(r => r.recommended === 9).length <= 9);
+      assert.equal(scores.filter(r => r.recommended === 10).length, 0);
+      assert.ok(scores.every(r => r.probabilities.slice(0, 3).every(p => p === 0)));
+      assert.equal(scoreAtPercentile(0.975, spread), 8.5);
+      assert.equal(scoreAtPercentile(1, spread), 9);
+      assert.equal(scoreAtPercentile(0, spread), 4);
+    }
+    data.comparisons = []; data.anchors.forEach(a => { a.rate = 10; });
+    assert.ok([...estimateCategory(data, 2).values()].every(r => r.score === 6));
+    // A large tied top block remains tied; it is not arbitrarily awarded scarce 9s.
+    data.anchors.slice(0, 30).forEach(a => { a.rate = 1; });
+    const tiedTop = [...estimateCategory(data, 2).values()].slice(30);
+    assert.equal(new Set(tiedTop.map(r => r.score)).size, 1);
+    assert.ok(tiedTop.every(r => r.recommended < 9));
+  }
 });

@@ -1,7 +1,7 @@
 import { categoryName, eligible } from './data.ts';
 import type { Data, Outcome, SubjectType } from './data.ts';
 import { getCollections, loggedInUsername } from './api.ts';
-import { estimate, newComparison, recompute, recordEstimate } from './model.ts';
+import { estimateCategory, newComparison, recompute } from './model.ts';
 import { nextPoolPair, nextContinuousPair, pairProbabilities, ratingChanges, refinementSubjects, rankedSubjects } from './refinement.ts';
 import { publishRating } from './publish.ts';
 import { load, save } from './storage.ts';
@@ -71,7 +71,7 @@ export async function openRefinement(user: { id: number; username: string }, ini
   }
   function begin(nextMode: 'continuous' | 'coverage' = 'continuous'): void {
     mode = nextMode; sessionChoices.clear();
-    const counts = refinementSubjects(data, type).map(a => estimate(data, a.id, type).useful);
+    const counts = [...estimateCategory(data, type).values()].map(a => a.useful);
     const minimum = Math.min(...counts);
     goal = minimum < 3 ? 3 : minimum + 3;
     view = 'compare'; notice = '';
@@ -114,7 +114,7 @@ export async function openRefinement(user: { id: number; username: string }, ini
 
   function spreadControl(): void {
     const label = el('label', '评分展开程度'); const select = el('select');
-    for (const [value, name] of [[1, '原始幅度'], [1.5, '适度展开'], [2, '展开（默认）'], [3, '更大幅度']] as const) {
+    for (const [value, name] of [[1, '较集中'], [1.5, '适度展开'], [2, '展开（默认）'], [3, '更大幅度']] as const) {
       const option = el('option', name); option.value = String(value); select.append(option);
     }
     select.value = String(data.config.spread);
@@ -122,7 +122,7 @@ export async function openRefinement(user: { id: number; username: string }, ini
       const next = structuredClone(data); next.config.spread = Number(select.value);
       recompute(next); await persist(next); selected.clear(); notice = '';
     });
-    label.append(select); content.append(label, el('p', '围绕各类别平均偏好展开分差，保持模型顺序与 1–10 分范围。只调整本地建议；确认批量更新后才写入 Bangumi。', 'bpr-muted'));
+    label.append(select); content.append(label, el('p', '按类别分布展开中段分差，最低 4 分；9 分约占 1/40；10 分仅由你在 Bangumi 手动决定。并列条目同分，比例为目标而非硬配额。只调整本地建议，确认批量更新后才写入 Bangumi。', 'bpr-muted'));
   }
   function renderRanking(): void {
     heading.textContent = '偏好排名';
@@ -145,7 +145,7 @@ export async function openRefinement(user: { id: number; username: string }, ini
         tr.append(el('td', row.rank === null ? '—' : String(row.rank)), title,
           el('td', row.subject.rate === null ? '未评分' : String(row.subject.rate)),
           el('td', row.result ? row.result.score.toFixed(2) : '待比较'),
-          el('td', String(estimate(data, row.subject.id, type).useful))); body.append(tr);
+          el('td', String(data.records.find(r => r.subjectId === row.subject.id)?.useful ?? 0))); body.append(tr);
       }
       table.append(body); const scroll = el('div', '', 'bpr-table-scroll bpr-ranking-table'); scroll.append(table); content.append(scroll);
     } else content.append(el('p', '先导入已完成的公开收藏，再开始比较。'));
@@ -165,7 +165,7 @@ export async function openRefinement(user: { id: number; username: string }, ini
     select.value = String(type); select.onchange = () => { type = Number(select.value) as SubjectType; selected.clear(); render(); };
     label.append(select); content.append(label); spreadControl();
     const pool = refinementSubjects(data, type);
-    const ready = pool.filter(a => estimate(data, a.id, type).useful >= 3).length;
+    const ready = [...estimateCategory(data, type).values()].filter(a => a.useful >= 3).length;
     content.append(el('p', `${ready}/${pool.length} 个条目已有至少 3 次有效比较。各类别独立，需要至少 50 个已评分且已完成的公开收藏。`, 'bpr-muted'));
     const actions = el('div', '', 'bpr-actions');
     const start = button('连续细化（20 次一轮）', async () => { begin(); }, true); start.disabled = !eligible(data.anchors, type);
@@ -175,7 +175,7 @@ export async function openRefinement(user: { id: number; username: string }, ini
   }
   function renderCompare(): void {
     const pool = refinementSubjects(data, type);
-    const done = pool.filter(a => estimate(data, a.id, type).useful >= goal).length;
+    const done = [...estimateCategory(data, type).values()].filter(a => a.useful >= goal).length;
     const paused = mode === 'continuous' && sessionChoices.size >= sessionLimit;
     content.append(el('p', mode === 'continuous'
       ? `${categoryName[type]} · 连续细化 · 本轮 ${sessionChoices.size}/${sessionLimit} 次选择`
@@ -203,7 +203,7 @@ export async function openRefinement(user: { id: number; username: string }, ini
       for (const [label, outcome] of [['更喜欢左边', 'target'], ['更喜欢右边', 'reference'], ['差不多', 'tie'], ['无法判断 / 跳过', 'skip']] as [string, Outcome][]) {
         choices.append(button(label, async () => {
           const next = structuredClone(data); const comparison = newComparison(pair[0].id, pair[1].id, outcome, type); next.comparisons.push(comparison);
-          for (const subject of pair) recordEstimate(next, subject.id, type);
+          recompute(next);
           await persist(next); sessionChoices.add(comparison.id);
         }, outcome === 'target' || outcome === 'reference'));
       }
@@ -213,7 +213,7 @@ export async function openRefinement(user: { id: number; username: string }, ini
     const undo = button('撤销上次比较', async () => {
       if (!last) return;
       const next = structuredClone(data); next.comparisons = next.comparisons.filter(c => c.id !== last.id);
-      recordEstimate(next, last.target, type); recordEstimate(next, last.reference, type); await persist(next); sessionChoices.delete(last.id);
+      recompute(next); await persist(next); sessionChoices.delete(last.id);
     }); undo.disabled = !last;
     const actions = el('div', '', 'bpr-actions');
     actions.append(undo, button('查看偏好排名', async () => { view = 'ranking'; }), button('先检查已有变化', async () => { view = 'review'; }), button('返回类别', async () => { view = 'category'; }));

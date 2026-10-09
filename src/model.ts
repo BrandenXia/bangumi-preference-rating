@@ -26,9 +26,7 @@ export function anchorStrength(rate: number): number {
   return theta;
 }
 
-export function estimate(data: Data, subjectId: number, type: SubjectType): Estimate {
-  const anchors = new Map(data.anchors.filter(a => a.type === type).map(a => [a.id, anchorStrength(a.rate)]));
-  const center = anchors.size ? [...anchors.values()].reduce((a, b) => a + b, 0) / anchors.size : 0;
+function latentEstimate(data: Data, subjectId: number, type: SubjectType, anchors: Map<number, number>, center: number): Pick<Estimate, 'strength' | 'useful' | 'range'> {
   const prior = anchors.get(subjectId) ?? center;
   // A choice refines both rated entries; store the event once and reverse its outcome
   // when this entry appeared on the right. Unrated references remain unusable priors.
@@ -64,15 +62,67 @@ export function estimate(data: Data, subjectId: number, type: SubjectType): Esti
       if (Math.abs(step) < 1e-7) break;
     }
   }
-  // Stretch latent preferences around this category's mean without changing
-  // evidence, pair probabilities or ordering. The ordinal map keeps 1–10 bounds.
-  const scale = (strength: number) => center + (strength - center) * data.config.spread;
-  const calibrated = calibrate(scale(theta));
-  // Conditional Laplace curvature with a noise floor, explicitly a sensitivity range.
+  // Conditional curvature with a noise floor, expressed on the latent scale.
   const spread = Math.sqrt(1 / precision + 0.5);
-  return { strength: theta, ...calibrated, useful: observations.length,
-    recommended: clamp(Math.round(calibrated.score), 1, 10),
-    range: data.config.model === 'bt' ? [calibrate(scale(theta - 1.96 * spread)).score, calibrate(scale(theta + 1.96 * spread)).score] : null };
+  return { strength: theta, useful: observations.length,
+    range: data.config.model === 'bt' ? [theta - 1.96 * spread, theta + 1.96 * spread] : null };
+}
+
+// A category-relative suggestion scale: 9 starts at the top 2.5%.
+// Automatic suggestions stop at 9; only the user can choose 10 on Bangumi.
+// Spread changes the middle of the scale, never these rare-score thresholds.
+export function scoreAtPercentile(percentile: number, spread: Data['config']['spread']): number {
+  const knots = [[0, 4], [0.1, 6 - spread / 2], [0.5, 6], [0.9, 6 + spread / 2], [0.975, 8.5], [1, 9]];
+  const p = clamp(percentile, 0, 1);
+  for (let i = 1; i < knots.length; i++) {
+    const [right, high] = knots[i], [left, low] = knots[i - 1];
+    if (p <= right) return low + (high - low) * (p - left) / (right - left);
+  }
+  return 9;
+}
+
+export function estimateCategory(data: Data, type: SubjectType, extraIds: number[] = []): Map<number, Estimate> {
+  const anchors = new Map(data.anchors.filter(a => a.type === type).map(a => [a.id, anchorStrength(a.rate)]));
+  const center = anchors.size ? [...anchors.values()].reduce((a, b) => a + b, 0) / anchors.size : 0;
+  const pool = [...anchors.keys(), ...data.unrated.filter(a => a.type === type).map(a => a.id)];
+  const raw = new Map([...new Set([...pool, ...extraIds])].map(id => [id, latentEstimate(data, id, type, anchors, center)]));
+  const strengths = pool.map(id => raw.get(id)!.strength).sort((a, b) => a - b);
+  const points: { strength: number; percentile: number }[] = [];
+  for (let i = 0; i < strengths.length;) {
+    let end = i + 1;
+    while (end < strengths.length && Math.abs(strengths[end] - strengths[i]) < 1e-9) end++;
+    // Ties share their midpoint percentile; no arbitrary splitting into 9s/10s.
+    points.push({ strength: strengths[i], percentile: (i + end) / (2 * strengths.length) });
+    i = end;
+  }
+  const percentile = (strength: number): number => {
+    if (!points.length) return 0.5;
+    for (let i = 0; i < points.length; i++) {
+      const right = points[i];
+      if (Math.abs(strength - right.strength) < 1e-9) return right.percentile;
+      if (strength < right.strength) {
+        if (i === 0) return 0;
+        const left = points[i - 1];
+        return left.percentile + (right.percentile - left.percentile) * (strength - left.strength) / (right.strength - left.strength);
+      }
+    }
+    return 1;
+  };
+  const scoreFor = (strength: number) => scoreAtPercentile(percentile(strength), data.config.spread);
+  return new Map([...raw].map(([id, result]) => {
+    const score = scoreFor(result.strength);
+    // Rounding weights for the displayed suggestion, not posterior confidence.
+    const probabilities = Array(10).fill(0) as number[];
+    const lower = Math.floor(score);
+    probabilities[lower - 1] = 1 - (score - lower);
+    if (lower < 10) probabilities[lower] = score - lower;
+    return [id, { ...result, score, probabilities, recommended: Math.round(score),
+      range: result.range ? [scoreFor(result.range[0]), scoreFor(result.range[1])] as [number, number] : null }];
+  }));
+}
+
+export function estimate(data: Data, subjectId: number, type: SubjectType): Estimate {
+  return estimateCategory(data, type, [subjectId]).get(subjectId)!;
 }
 
 export function chooseReference(anchors: Anchor[], target: number, strength: number, seen: Set<number>): Anchor | undefined {
@@ -81,13 +131,13 @@ export function chooseReference(anchors: Anchor[], target: number, strength: num
     Math.abs(anchorStrength(a.rate) - strength) - Math.abs(anchorStrength(b.rate) - strength) || a.id - b.id)[0];
 }
 
-export function recordEstimate(data: Data, subjectId: number, type: SubjectType): void {
+export function recordEstimate(data: Data, subjectId: number, type: SubjectType, estimated?: Estimate): void {
   const previous = data.records.find(r => r.subjectId === subjectId);
   const current = data.anchors.find(a => a.id === subjectId)?.rate ?? null;
-  const result = { ...estimate(data, subjectId, type), subjectId, subjectType: type,
+  const result = { ...(estimated ?? estimate(data, subjectId, type)), subjectId, subjectType: type,
     originalRating: previous ? previous.originalRating : current, currentRating: current,
     lastPublishedRating: previous?.lastPublishedRating ?? null,
-    model: data.config.model, modelVersion: 1 as const, calibration: 'spread-ordinal-v2' as const,
+    model: data.config.model, modelVersion: 1 as const, calibration: 'category-tail-v3' as const,
     updatedAt: new Date().toISOString() };
   data.records = [...data.records.filter(r => r.subjectId !== subjectId), result];
 }
@@ -95,7 +145,11 @@ export function recordEstimate(data: Data, subjectId: number, type: SubjectType)
 export function recompute(data: Data): void {
   const targets = new Map([...data.records.map(r => [r.subjectId, r.subjectType] as const),
     ...data.comparisons.flatMap(c => [[c.target, c.subjectType] as const, [c.reference, c.subjectType] as const])]);
-  for (const [id, type] of targets) recordEstimate(data, id, type);
+  for (const type of new Set(targets.values())) {
+    const ids = [...targets].filter(([, category]) => category === type).map(([id]) => id);
+    const estimates = estimateCategory(data, type, ids);
+    for (const id of ids) recordEstimate(data, id, type, estimates.get(id));
+  }
 }
 
 export function newComparison(target: number, reference: number, outcome: Comparison['outcome'], subjectType: SubjectType): Comparison {

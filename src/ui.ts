@@ -1,7 +1,7 @@
 import { categoryName, eligible, parseBackup } from './data.ts';
 import type { Subject, Data, Model, Outcome } from './data.ts';
 import { getCollections, loggedInUsername } from './api.ts';
-import { chooseReference, estimate, newComparison, recompute, recordEstimate } from './model.ts';
+import { chooseReference, estimate, newComparison, recompute } from './model.ts';
 import { load, save } from './storage.ts';
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, text = '', className = ''): HTMLElementTagNameMap[K] {
@@ -193,8 +193,7 @@ export async function openPanel(user: { id: number; username: string }, subject:
         choices.append(button(label, async () => {
           const next = structuredClone(data);
           const comparison = newComparison(subject.id, candidate.id, outcome, subject.type);
-          next.comparisons.push(comparison); recordEstimate(next, subject.id, subject.type);
-          recordEstimate(next, candidate.id, subject.type); await update(next);
+          next.comparisons.push(comparison); recompute(next); await update(next);
           seen.add(candidate.id); currentReference = null;
         }, outcome === 'target' || outcome === 'reference' ? 'bpr-primary' : ''));
       }
@@ -216,7 +215,7 @@ export async function openPanel(user: { id: number; username: string }, subject:
     const undo = button('撤销上次比较', async () => {
       if (!last) return;
       const next = structuredClone(data); next.comparisons = next.comparisons.filter(c => c.id !== last.id);
-      recordEstimate(next, last.target, subject.type); recordEstimate(next, last.reference, subject.type); await update(next);
+      recompute(next); await update(next);
       const peer = last.target === subject.id ? last.reference : last.target;
       seen.delete(peer); currentReference = peer;
     }); undo.disabled = !last;

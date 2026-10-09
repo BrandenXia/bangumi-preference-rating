@@ -15,7 +15,7 @@ export interface Estimate {
 export interface Record extends Estimate {
   subjectId: number; subjectType: SubjectType; originalRating: number | null; currentRating: number | null;
   lastPublishedRating: number | null; model: Model; modelVersion: 1;
-  calibration: 'fixed-ordinal-v1' | 'spread-ordinal-v2'; updatedAt: string;
+  calibration: 'fixed-ordinal-v1' | 'spread-ordinal-v2' | 'category-tail-v3'; updatedAt: string;
 }
 export interface Data {
   version: 2; completedOnly: true; userId: number; revision: number; importedAt: string | null;
@@ -85,7 +85,7 @@ export function parseBackup(value: unknown, userId: number): Data {
   });
   ids.clear();
   out.records = v.records.map(r => {
-    if (!r || !validId(r.subjectId) || !validType(r.subjectType) || ids.has(r.subjectId) || !date(r.updatedAt) || !['bt', 'elo'].includes(r.model) || r.modelVersion !== 1 || !['fixed-ordinal-v1', 'spread-ordinal-v2'].includes(r.calibration)) return fail();
+    if (!r || !validId(r.subjectId) || !validType(r.subjectType) || ids.has(r.subjectId) || !date(r.updatedAt) || !['bt', 'elo'].includes(r.model) || r.modelVersion !== 1 || !['fixed-ordinal-v1', 'spread-ordinal-v2', 'category-tail-v3'].includes(r.calibration)) return fail();
     checkType(r.subjectId, r.subjectType);
     if (![r.originalRating, r.currentRating, r.lastPublishedRating].every(n => n === null || validRate(n))) return fail();
     if (!Number.isFinite(r.score) || r.score < 1 || r.score > 10 || !Number.isFinite(r.strength) || Math.abs(r.strength) > 20 || !validRate(r.recommended) || !Number.isSafeInteger(r.useful) || r.useful < 0) return fail();
