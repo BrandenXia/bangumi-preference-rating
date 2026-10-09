@@ -1,6 +1,6 @@
 import { eligible } from './data.ts';
 import type { Anchor, Data, Subject, SubjectType, Estimate } from './data.ts';
-import { estimateCategory } from './model.ts';
+import { estimateCategory, recompute } from './model.ts';
 
 export type PoolSubject = Subject & { rate: number | null };
 export function refinementSubjects(data: Data, type: SubjectType): PoolSubject[] {
@@ -83,7 +83,7 @@ export function ratingChanges(data: Data, type: SubjectType): RatingChange[] {
   // Keep this review snapshot stable while a batch updates reference ratings.
   return refinementSubjects(data, type).flatMap(subject => {
     const record = data.records.find(r => r.subjectId === subject.id && r.subjectType === type);
-    return record && record.useful >= 3 && record.recommended !== subject.rate
+    return record && (record.manual || record.useful >= 3) && record.recommended !== subject.rate
       ? [{ subject, score: record.score, from: subject.rate, to: record.recommended }] : [];
   });
 }
@@ -93,7 +93,7 @@ export function rankedSubjects(data: Data, type: SubjectType): { subject: PoolSu
   const estimates = estimateCategory(data, type);
   const rows = refinementSubjects(data, type).map(subject => {
     const result = estimates.get(subject.id)!;
-    return { subject, result: ready && result.useful >= 3 ? result : null, rank: null as number | null };
+    return { subject, result: ready && (result.manual || result.useful >= 3) ? result : null, rank: null as number | null };
   }).sort((a, b) => Number(b.result !== null) - Number(a.result !== null) ||
     (b.result?.score ?? 0) - (a.result?.score ?? 0) || a.subject.id - b.subject.id);
   let rank = 0;
@@ -103,4 +103,15 @@ export function rankedSubjects(data: Data, type: SubjectType): { subject: PoolSu
     row.rank = rank;
   });
   return rows;
+}
+
+
+export function setManualOrder(data: Data, type: SubjectType, subjects: number[]): void {
+  const pool = refinementSubjects(data, type);
+  const ids = new Set(pool.map(a => a.id));
+  if (!eligible(data.anchors, type) || subjects.length !== ids.size || new Set(subjects).size !== ids.size || subjects.some(id => !ids.has(id))) {
+    throw new Error('只能排列此类别全部已完成的公开收藏，请刷新后重试。');
+  }
+  data.manualOrders = [...data.manualOrders.filter(order => order.subjectType !== type), { subjectType: type, subjects: [...subjects] }];
+  recompute(data);
 }

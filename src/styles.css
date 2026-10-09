@@ -50,3 +50,13 @@ html[data-theme="dark"] #bpr-entry, html[data-theme="dark"] #bpr-home-entry, htm
 #bpr-dialog .bpr-result { padding: 10px; border: 1px solid var(--bpr-border); border-radius: 5px; }
 
 #bpr-dialog .bpr-ranking-table { max-height: 40vh; overflow: auto; }
+
+#bpr-dialog .bpr-grip { cursor: grab; touch-action: none; user-select: none; padding: 3px 9px; }
+#bpr-dialog .bpr-grip:active { cursor: grabbing; }
+#bpr-dialog .bpr-dragging { opacity: .45; }
+#bpr-dialog .bpr-drop-before td { box-shadow: inset 0 2px var(--primary-color, #f09199); }
+#bpr-dialog .bpr-drop-after td { box-shadow: inset 0 -2px var(--primary-color, #f09199); }
+
+#bpr-dialog .bpr-ranking-filters { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+#bpr-dialog .bpr-ranking-filters label { margin: 0; }
+#bpr-dialog .bpr-ranking-filters details { margin: 6px 0 0; }

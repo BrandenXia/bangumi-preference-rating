@@ -2,7 +2,7 @@ import { categoryName, eligible } from './data.ts';
 import type { Data, Outcome, SubjectType } from './data.ts';
 import { getCollections, loggedInUsername } from './api.ts';
 import { estimateCategory, newComparison, recompute } from './model.ts';
-import { nextPoolPair, nextContinuousPair, pairProbabilities, ratingChanges, refinementSubjects, rankedSubjects } from './refinement.ts';
+import { nextPoolPair, nextContinuousPair, pairProbabilities, ratingChanges, refinementSubjects, rankedSubjects, setManualOrder } from './refinement.ts';
 import { publishRating } from './publish.ts';
 import { load, save } from './storage.ts';
 
@@ -36,6 +36,7 @@ export async function openRefinement(user: { id: number; username: string }, ini
   let stop = false;
   const selected = new Set<number>();
   let notice = '';
+  let draftOrder: { subjectType: SubjectType; subjects: number[] } | null = null;
 
   function alive(): void {
     if (!dialog.isConnected || loggedInUsername() !== user.username) throw new Error('窗口已关闭或登录用户已改变，请重新加载页面。');
@@ -67,7 +68,7 @@ export async function openRefinement(user: { id: number; username: string }, ini
   async function refresh(): Promise<void> {
     const collections = await getCollections(user.username, count => { status.textContent = `正在读取公开收藏：${count} 个条目`; });
     const next = structuredClone(data); next.anchors = collections.anchors; next.unrated = collections.unrated; next.importedAt = new Date().toISOString();
-    recompute(next); await persist(next); selected.clear(); notice = '';
+    recompute(next); await persist(next); selected.clear(); draftOrder = null; notice = '';
   }
   function begin(nextMode: 'continuous' | 'coverage' = 'continuous'): void {
     mode = nextMode; sessionChoices.clear();
@@ -112,7 +113,7 @@ export async function openRefinement(user: { id: number; username: string }, ini
     } finally { publishing = false; close.textContent = '关闭'; }
   }
 
-  function spreadControl(): void {
+  function spreadControl(container: HTMLElement = content, compact = false): void {
     const label = el('label', '评分展开程度'); const select = el('select');
     for (const [value, name] of [[1, '较集中'], [1.5, '适度展开'], [2, '展开（默认）'], [3, '更大幅度']] as const) {
       const option = el('option', name); option.value = String(value); select.append(option);
@@ -122,36 +123,126 @@ export async function openRefinement(user: { id: number; username: string }, ini
       const next = structuredClone(data); next.config.spread = Number(select.value);
       recompute(next); await persist(next); selected.clear(); notice = '';
     });
-    label.append(select); content.append(label, el('p', '按类别分布展开中段分差，最低 4 分；9 分约占 1/40；10 分仅由你在 Bangumi 手动决定。并列条目同分，比例为目标而非硬配额。只调整本地建议，确认批量更新后才写入 Bangumi。', 'bpr-muted'));
+    label.append(select);
+    const explanation = el('p', '按类别分布展开中段分差，最低 4 分；9 分约占 1/40；10 分仅由你在 Bangumi 手动决定。并列条目同分，比例为目标而非硬配额。只调整本地建议，确认批量更新后才写入 Bangumi。', 'bpr-muted');
+    if (compact) { const details = el('details'); details.append(el('summary', '评分规则（4–9 分）'), explanation); container.append(label, details); }
+    else container.append(label, explanation);
   }
   function renderRanking(): void {
     heading.textContent = '偏好排名';
     const label = el('label', '排名类别'); const select = el('select');
     for (const [id, name] of Object.entries(categoryName)) { const option = el('option', name); option.value = id; select.append(option); }
-    select.value = String(type); select.onchange = () => { type = Number(select.value) as SubjectType; selected.clear(); render(); };
-    label.append(select); content.append(label); spreadControl();
-    const rows = rankedSubjects(data, type);
+    select.value = String(type); select.onchange = () => { type = Number(select.value) as SubjectType; selected.clear(); draftOrder = null; render(); };
+    label.append(select); const filters = el('div', '', 'bpr-ranking-filters'); const spread = el('div');
+    filters.append(label, spread); content.append(filters); spreadControl(spread, true);
+    const display = draftOrder?.subjectType === type
+      ? { ...data, manualOrders: [...data.manualOrders.filter(order => order.subjectType !== type), draftOrder] } : data;
+    const rows = rankedSubjects(display, type);
+    const manual = display.manualOrders.some(order => order.subjectType === type);
+    const canArrange = eligible(data.anchors, type);
+    content.append(el('p', '拖动 ↕ 或用方向键调整顺序（Home / End 到首尾）。保存后为整个列表生成 4–9 分建议，包括待比较条目；可恢复模型排序。', 'bpr-muted'));
+    const orderActions = el('div', '', 'bpr-actions');
+    const saveOrder = button('保存手动顺序', async () => {
+      if (!draftOrder || draftOrder.subjectType !== type) return;
+      const next = structuredClone(data); setManualOrder(next, type, draftOrder.subjects);
+      await persist(next); draftOrder = null; selected.clear(); notice = '已保存手动顺序；Bangumi 评分尚未更新。';
+    }, true); saveOrder.disabled = !draftOrder || !canArrange;
+    const cancelOrder = button('取消排列', async () => { draftOrder = null; }); cancelOrder.disabled = !draftOrder;
+    const modelOrder = button('恢复模型排序', async () => {
+      const next = structuredClone(data); next.manualOrders = next.manualOrders.filter(order => order.subjectType !== type);
+      recompute(next); await persist(next); draftOrder = null; selected.clear(); notice = '已恢复模型排序，比较历史保留。';
+    }); modelOrder.disabled = !data.manualOrders.some(order => order.subjectType === type);
+    orderActions.append(saveOrder, cancelOrder, modelOrder); content.append(orderActions);
+    if (draftOrder) content.append(el('p', '手动排列预览 · 尚未保存', 'bpr-subtitle'));
+
     const ranked = rows.filter(row => row.result);
-    content.append(el('p', `${categoryName[type]} · ${ranked.length}/${rows.length} 个已完成条目已有偏好评分，按未四舍五入的分数从高到低排列。同分同名次；不足 3 次有效比较的条目列在末尾。`, 'bpr-muted'));
+    content.append(el('p', `${categoryName[type]} · ${ranked.length}/${rows.length} 个已完成条目已有偏好评分，${manual ? '手动排序' : '模型排序'}，按未四舍五入的分数从高到低排列。模型同分同名次；未手动排序且不足 3 次有效比较的条目列在末尾。`, 'bpr-muted'));
     if (!eligible(data.anchors, type)) content.append(el('p', '此类别不足 50 个已评分且已完成的公开收藏，暂不能生成偏好排名。', 'bpr-muted'));
     if (ranked.length) content.append(el('p', `当前分布：${ranked.at(-1)!.result!.score.toFixed(2)}–${ranked[0].result!.score.toFixed(2)}`, 'bpr-subtitle'));
     if (rows.length) {
       const table = el('table', '', 'bpr-review'); const head = el('tr');
-      for (const title of ['名次', '条目', '当前', '偏好评分', '有效比较']) head.append(el('th', title));
+      for (const title of ['排列', '名次', '条目', '当前', '偏好评分', '有效比较']) head.append(el('th', title));
       const thead = el('thead'); thead.append(head); table.append(thead); const body = el('tbody');
-      for (const row of rows) {
+      const scroll = el('div', '', 'bpr-table-scroll bpr-ranking-table');
+      function move(id: number, destination: number, reveal = false): void {
+        if (busy || !canArrange) return;
+        const order = rows.map(row => row.subject.id); const from = order.indexOf(id);
+        const to = Math.max(0, Math.min(order.length - 1, destination));
+        if (from === to || from < 0) return;
+        order.splice(from, 1); order.splice(to, 0, id);
+        draftOrder = { subjectType: type, subjects: order };
+        const scrollTop = scroll.scrollTop; const dialogTop = dialog.scrollTop;
+        render();
+        const nextScroll = content.querySelector<HTMLElement>('.bpr-ranking-table');
+        if (nextScroll) nextScroll.scrollTop = scrollTop;
+        dialog.scrollTop = dialogTop;
+        const moved = content.querySelector<HTMLButtonElement>(`[data-move-id="${id}"]`);
+        moved?.focus({ preventScroll: true });
+        if (reveal) moved?.scrollIntoView({ block: 'nearest' });
+      }
+      for (const [index, row] of rows.entries()) {
         const tr = el('tr'); const title = el('td'); const link = el('a', row.subject.title);
         link.href = `/subject/${row.subject.id}`; link.target = '_blank'; link.rel = 'noopener'; title.append(link);
-        tr.append(el('td', row.rank === null ? '—' : String(row.rank)), title,
+        tr.dataset.subjectId = String(row.subject.id);
+        const gripCell = el('td'); const grip = el('button', '↕', 'bpr-grip'); grip.type = 'button';
+        grip.dataset.moveId = String(row.subject.id); grip.disabled = !canArrange;
+        grip.setAttribute('aria-label', `调整 ${row.subject.title} 的顺序`);
+        grip.title = '拖动排列；方向键移动，Home / End 移到首尾';
+        grip.onkeydown = event => {
+          const destination = event.key === 'ArrowUp' ? index - 1 : event.key === 'ArrowDown' ? index + 1 : event.key === 'Home' ? 0 : event.key === 'End' ? rows.length - 1 : null;
+          if (destination !== null) { event.preventDefault(); move(row.subject.id, destination, true); }
+        };
+        let startY: number | null = null; let destination = index; let dragging = false;
+        let scrollFrame = 0; let pointerX = 0; let pointerY = 0;
+        const clearDrag = () => {
+          cancelAnimationFrame(scrollFrame); scrollFrame = 0;
+          startY = null; dragging = false; tr.classList.remove('bpr-dragging');
+          for (const marked of body.querySelectorAll('.bpr-drop-before, .bpr-drop-after')) marked.classList.remove('bpr-drop-before', 'bpr-drop-after');
+        };
+        grip.onpointerdown = event => {
+          if (busy || !canArrange || event.button !== 0) return;
+          startY = event.clientY; destination = index; grip.setPointerCapture(event.pointerId); event.preventDefault();
+        };
+        const dragPosition = () => {
+          const bounds = scroll.getBoundingClientRect();
+          if (pointerY < Math.max(bounds.top, dialog.getBoundingClientRect().top) + 30) scroll.scrollTop -= 10;
+          if (pointerY > Math.min(bounds.bottom, dialog.getBoundingClientRect().bottom) - 30) scroll.scrollTop += 10;
+          for (const marked of body.querySelectorAll('.bpr-drop-before, .bpr-drop-after')) marked.classList.remove('bpr-drop-before', 'bpr-drop-after');
+          const target = document.elementFromPoint(pointerX, pointerY)?.closest<HTMLTableRowElement>('tr[data-subject-id]');
+          if (!target || !body.contains(target)) return;
+          const targetIndex = rows.findIndex(r => String(r.subject.id) === target.dataset.subjectId);
+          const rect = target.getBoundingClientRect(); const after = pointerY > rect.top + rect.height / 2;
+          const insertion = targetIndex + Number(after);
+          destination = insertion > index ? insertion - 1 : insertion;
+          target.classList.add(after ? 'bpr-drop-after' : 'bpr-drop-before');
+        };
+        const autoScroll = () => {
+          if (!dragging || !grip.isConnected) { clearDrag(); return; }
+          dragPosition(); scrollFrame = requestAnimationFrame(autoScroll);
+        };
+        grip.onpointermove = event => {
+          if (startY === null || Math.abs(event.clientY - startY) < 4 && !dragging) return;
+          pointerX = event.clientX; pointerY = event.clientY;
+          dragging = true; tr.classList.add('bpr-dragging'); dragPosition();
+          if (!scrollFrame) scrollFrame = requestAnimationFrame(autoScroll);
+        };
+        grip.onpointerup = event => {
+          const shouldMove = dragging; const to = destination; clearDrag();
+          if (grip.hasPointerCapture(event.pointerId)) grip.releasePointerCapture(event.pointerId);
+          if (shouldMove) move(row.subject.id, to);
+        };
+        grip.onpointercancel = clearDrag; grip.onlostpointercapture = clearDrag;
+        gripCell.append(grip);
+        tr.append(gripCell, el('td', row.rank === null ? '—' : String(row.rank)), title,
           el('td', row.subject.rate === null ? '未评分' : String(row.subject.rate)),
           el('td', row.result ? row.result.score.toFixed(2) : '待比较'),
           el('td', String(data.records.find(r => r.subjectId === row.subject.id)?.useful ?? 0))); body.append(tr);
       }
-      table.append(body); const scroll = el('div', '', 'bpr-table-scroll bpr-ranking-table'); scroll.append(table); content.append(scroll);
+      table.append(body); scroll.append(table); content.append(scroll);
     } else content.append(el('p', '先导入已完成的公开收藏，再开始比较。'));
     const actions = el('div', '', 'bpr-actions');
-    const compare = button('连续细化（20 次一轮）', async () => { begin(); }, true); compare.disabled = !eligible(data.anchors, type);
-    const review = button('检查评分变化', async () => { view = 'review'; }); review.disabled = !eligible(data.anchors, type);
+    const compare = button('连续细化（20 次一轮）', async () => { begin(); }, true); compare.disabled = !eligible(data.anchors, type) || draftOrder !== null;
+    const review = button('检查评分变化', async () => { view = 'review'; }); review.disabled = !eligible(data.anchors, type) || draftOrder !== null;
     actions.append(compare, review, button('刷新当前评分', refresh), button('返回类别', async () => { view = 'category'; })); content.append(actions);
   }
   function renderCategory(): void {
@@ -162,7 +253,7 @@ export async function openRefinement(user: { id: number; username: string }, ini
       const unscored = data.unrated.filter(a => a.type === Number(id)).length;
       const option = el('option', `${name} · ${count} 个已评分 / ${unscored} 个未评分`); option.value = id; select.append(option);
     }
-    select.value = String(type); select.onchange = () => { type = Number(select.value) as SubjectType; selected.clear(); render(); };
+    select.value = String(type); select.onchange = () => { type = Number(select.value) as SubjectType; selected.clear(); draftOrder = null; render(); };
     label.append(select); content.append(label); spreadControl();
     const pool = refinementSubjects(data, type);
     const ready = [...estimateCategory(data, type).values()].filter(a => a.useful >= 3).length;
@@ -176,6 +267,7 @@ export async function openRefinement(user: { id: number; username: string }, ini
   function renderCompare(): void {
     const pool = refinementSubjects(data, type);
     const done = [...estimateCategory(data, type).values()].filter(a => a.useful >= goal).length;
+    if (data.manualOrders.some(order => order.subjectType === type)) content.append(el('p', '当前使用手动顺序。新的比较仍会保存；在排名面板恢复模型排序后，它们才会改变排名与建议。', 'bpr-muted'));
     const paused = mode === 'continuous' && sessionChoices.size >= sessionLimit;
     content.append(el('p', mode === 'continuous'
       ? `${categoryName[type]} · 连续细化 · 本轮 ${sessionChoices.size}/${sessionLimit} 次选择`
@@ -231,7 +323,7 @@ export async function openRefinement(user: { id: number; username: string }, ini
     const ids = new Set(changes.map(c => c.subject.id));
     for (const id of selected) if (!ids.has(id)) selected.delete(id);
     content.append(el('h3', `${categoryName[type]} · ${changes.length} 个评分建议`));
-    content.append(el('p', '仅列出至少有 3 次有效比较、且未评分或建议整数与当前公开评分不同的条目。两位小数是模型建议。'));
+    content.append(el('p', '仅列出已保存手动顺序或至少有 3 次有效比较、且未评分或建议整数与当前公开评分不同的条目。两位小数是本地建议。'));
     if (notice) content.append(el('p', notice, 'bpr-result'));
     const actions = el('div', '', 'bpr-actions');
     const publish = button(`更新已选 ${selected.size} 个评分`, publishSelected, true); publish.disabled = selected.size === 0;

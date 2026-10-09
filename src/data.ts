@@ -10,7 +10,7 @@ export interface Comparison {
 }
 export interface Estimate {
   strength: number; score: number; recommended: number; useful: number;
-  range: [number, number] | null; probabilities: number[];
+  range: [number, number] | null; probabilities: number[]; manual?: true;
 }
 export interface Record extends Estimate {
   subjectId: number; subjectType: SubjectType; originalRating: number | null; currentRating: number | null;
@@ -20,6 +20,7 @@ export interface Record extends Estimate {
 export interface Data {
   version: 2; completedOnly: true; userId: number; revision: number; importedAt: string | null;
   anchors: Anchor[]; unrated: Subject[]; comparisons: Comparison[]; records: Record[];
+  manualOrders: { subjectType: SubjectType; subjects: number[] }[];
   config: { model: Model; shrinkage: number; spread: number };
 }
 
@@ -28,7 +29,7 @@ export const validRate = (n: unknown): n is number => Number.isInteger(n) && Num
 export const eligible = (anchors: Anchor[], type: SubjectType) => new Set(anchors.filter(a => a.type === type && validId(a.id) && validRate(a.rate)).map(a => a.id)).size >= 50;
 export const emptyData = (userId: number): Data => ({
   version: 2, completedOnly: true, userId, revision: 0, importedAt: null, anchors: [], unrated: [], comparisons: [], records: [],
-  config: { model: 'bt', shrinkage: 1, spread: 2 },
+  manualOrders: [], config: { model: 'bt', shrinkage: 1, spread: 2 },
 });
 
 export function safeCover(value: unknown): string {
@@ -76,6 +77,15 @@ export function parseBackup(value: unknown, userId: number): Data {
     if (types.has(id) && types.get(id) !== type) return fail();
     types.set(id, type);
   };
+  if (v.manualOrders !== undefined && (!Array.isArray(v.manualOrders) || v.manualOrders.length > 5)) return fail();
+  const orderedTypes = new Set<SubjectType>();
+  out.manualOrders = (v.manualOrders ?? []).map(order => {
+    if (!order || !validType(order.subjectType) || orderedTypes.has(order.subjectType) || !Array.isArray(order.subjects) ||
+      order.subjects.length > 100000 || !order.subjects.every(validId) || new Set(order.subjects).size !== order.subjects.length) return fail();
+    orderedTypes.add(order.subjectType);
+    order.subjects.forEach(id => checkType(id, order.subjectType));
+    return { subjectType: order.subjectType, subjects: [...order.subjects] };
+  });
   const events = new Set<string>();
   out.comparisons = v.comparisons.map(c => {
     if (!c || typeof c.id !== 'string' || c.id.length > 100 || events.has(c.id) || !validId(c.target) || !validId(c.reference) || !validType(c.subjectType) || c.target === c.reference || !['target', 'reference', 'tie', 'skip'].includes(c.outcome) || !date(c.at)) return fail();
@@ -91,15 +101,16 @@ export function parseBackup(value: unknown, userId: number): Data {
     if (!Number.isFinite(r.score) || r.score < 1 || r.score > 10 || !Number.isFinite(r.strength) || Math.abs(r.strength) > 20 || !validRate(r.recommended) || !Number.isSafeInteger(r.useful) || r.useful < 0) return fail();
     if (r.range !== null && (!Array.isArray(r.range) || r.range.length !== 2 || !r.range.every(n => Number.isFinite(n) && n >= 1 && n <= 10) || r.range[0] > r.range[1])) return fail();
     if (!Array.isArray(r.probabilities) || r.probabilities.length !== 10 || !r.probabilities.every(n => Number.isFinite(n) && n >= 0 && n <= 1) || Math.abs(r.probabilities.reduce((a, b) => a + b, 0) - 1) > 0.00001) return fail();
+    if (r.manual !== undefined && r.manual !== true) return fail();
     ids.add(r.subjectId);
     return { subjectId: r.subjectId, subjectType: r.subjectType, originalRating: r.originalRating, currentRating: r.currentRating,
       lastPublishedRating: r.lastPublishedRating, strength: r.strength, score: r.score,
       recommended: r.recommended, useful: r.useful, range: r.range ? [...r.range] as [number, number] : null,
       probabilities: [...r.probabilities], model: r.model, modelVersion: 1,
-      calibration: r.calibration, updatedAt: r.updatedAt };
+      ...(r.manual ? { manual: true as const } : {}), calibration: r.calibration, updatedAt: r.updatedAt };
   });
   // Older imports included every status. Keep history but require a fresh
   // completed-only import before using those collections as scoring inputs.
-  if (v.completedOnly !== true) { out.anchors = []; out.unrated = []; out.importedAt = null; }
+  if (v.completedOnly !== true) { out.anchors = []; out.unrated = []; out.manualOrders = []; out.importedAt = null; }
   return out;
 }

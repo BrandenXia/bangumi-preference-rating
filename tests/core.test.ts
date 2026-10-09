@@ -261,3 +261,35 @@ test('category scale floors at 4, reserves about 1/40 for 9, never assigns 10 an
     assert.ok(tiedTop.every(r => r.recommended < 9));
   }
 });
+
+test('manual category order is exact, persists and supplies scores without fabricated comparisons', async () => {
+  const { setManualOrder, rankedSubjects, ratingChanges } = await import('../src/refinement.ts');
+  const data = emptyData(1); data.anchors = anchors(300);
+  data.unrated = [{ id: 999, type: 2, title: 'Completed unscored', cover: '' }];
+  data.anchors.push(...anchors(50).map(a => ({ ...a, id: a.id + 1000, type: 4 as const })));
+  const ids = [999, ...anchors(300).map(a => a.id).reverse()];
+  for (const model of ['bt', 'elo'] as const) {
+    data.config.model = model; setManualOrder(data, 2, ids);
+    const rows = rankedSubjects(data, 2);
+    assert.deepEqual(rows.map(r => r.subject.id), ids);
+    assert.ok(rows.every(r => r.result?.manual && r.result.score >= 4 && r.result.score <= 9 && r.result.range === null));
+    assert.equal(data.comparisons.length, 0);
+    assert.ok(rows.every(r => r.result!.useful === 0));
+    assert.ok(ratingChanges(data, 2).some(r => r.subject.id === 999 && r.from === null));
+    assert.equal(ratingChanges(data, 4).length, 0);
+    assert.deepEqual(parseBackup(JSON.parse(JSON.stringify(data)), 1), data);
+    data.comparisons.push(newComparison(1, 300, 'target', 2)); recompute(data);
+    assert.deepEqual(rankedSubjects(data, 2).map(r => r.subject.id), ids);
+    data.comparisons = [];
+  }
+  assert.throws(() => setManualOrder(data, 2, ids.slice(1)));
+  assert.throws(() => setManualOrder(data, 2, [1001, ...ids.slice(1)]));
+  assert.throws(() => setManualOrder(data, 2, [ids[1], ...ids.slice(1)]));
+  assert.throws(() => parseBackup({ ...data, manualOrders: [{ subjectType: 4, subjects: ids }] }, 1));
+  assert.throws(() => parseBackup({ ...data, manualOrders: [{ subjectType: 2, subjects: [1,1] }] }, 1));
+  const legacy = { ...data, manualOrders: undefined };
+  assert.deepEqual(parseBackup(legacy, 1).manualOrders, []);
+  data.manualOrders = []; recompute(data);
+  assert.ok(rankedSubjects(data, 2).every(r => r.result === null));
+  assert.ok(data.records.every(r => !r.manual));
+});
