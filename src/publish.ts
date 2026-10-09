@@ -24,7 +24,7 @@ async function collectionForm(id: number): Promise<{ action: string; fields: For
     throw new Error('收藏表单地址已变化，已停止更新。');
   }
   const fields = new FormData(form);
-  if (!fields.has('rating') || !['1', '2', '3', '4', '5'].includes(String(fields.get('interest')))) {
+  if (!form.querySelector('[name="rating"]') || (Number(fields.get('rating')) !== 0 && !validRate(Number(fields.get('rating')))) || !['1', '2', '3', '4', '5'].includes(String(fields.get('interest')))) {
     throw new Error('收藏表单格式已变化，已停止更新。');
   }
   return { action: action.href, fields };
@@ -32,13 +32,13 @@ async function collectionForm(id: number): Promise<{ action: string; fields: For
 
 // Use the existing signed-in form and its CSRF token. Preserve every successful
 // field, including status, privacy, tags, comment, and any progress controls.
-export async function publishRating(username: string, id: number, expected: number, rating: number): Promise<void> {
-  if (!validId(id) || !validRate(expected) || !validRate(rating)) throw new Error('评分参数无效。');
+export async function publishRating(username: string, id: number, expected: number | null, rating: number): Promise<void> {
+  if (!validId(id) || (expected !== null && !validRate(expected)) || !validRate(rating)) throw new Error('评分参数无效。');
   await assertSession(username);
   const before = await collectionForm(id);
   const current = Number(before.fields.get('rating'));
   if (current === rating) return; // A previous timed-out attempt may have succeeded.
-  if (current !== expected) throw new Error(`当前评分已从 ${expected} 变为 ${current}，请刷新公开评分后重新检查。`);
+  if (current !== (expected ?? 0)) throw new Error(`当前评分已从 ${expected ?? '未评分'} 变为 ${current || '未评分'}，请刷新公开评分后重新检查。`);
   const fields = before.fields;
   fields.set('rating', String(rating)); fields.set('referer', 'ajax'); fields.set('update', '保存');
   const response = await fetch(before.action, { method: 'POST', credentials: 'same-origin', body: fields,

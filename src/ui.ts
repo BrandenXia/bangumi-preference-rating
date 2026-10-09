@@ -1,6 +1,6 @@
 import { categoryName, eligible, parseBackup } from './data.ts';
 import type { Subject, Data, Model, Outcome } from './data.ts';
-import { getAnchors, loggedInUsername } from './api.ts';
+import { getCollections, loggedInUsername } from './api.ts';
 import { chooseReference, estimate, newComparison, recompute, recordEstimate } from './model.ts';
 import { load, save } from './storage.ts';
 
@@ -69,8 +69,8 @@ export async function openPanel(user: { id: number; username: string }, subject:
   }
 
   async function refresh(): Promise<void> {
-    const anchors = await getAnchors(user.username, n => { status.textContent = `正在读取公开评分：${n} 个条目`; });
-    const next = structuredClone(data); next.anchors = anchors; next.importedAt = new Date().toISOString();
+    const collections = await getCollections(user.username, n => { status.textContent = `正在读取公开收藏：${n} 个条目`; });
+    const next = structuredClone(data); next.anchors = collections.anchors; next.unrated = collections.unrated; next.importedAt = new Date().toISOString();
     recompute(next); await update(next); currentReference = null;
   }
 
@@ -137,7 +137,7 @@ export async function openPanel(user: { id: number; username: string }, subject:
     tools.append(button('导出 JSON', async () => { backupView = 'export'; }), button('导入 JSON', async () => { backupView = 'import'; }));
     tools.append(button('清除本地数据', async () => {
       if (!await confirmLocal('清除当前用户在此域名的全部偏好数据？建议先导出备份。')) return;
-      const next: Data = { ...data, anchors: [], comparisons: [], records: [], importedAt: null };
+      const next: Data = { ...data, anchors: [], unrated: [], comparisons: [], records: [], importedAt: null };
       await update(next); seen.clear(); currentReference = null;
     }, 'bpr-quiet'));
     content.append(tools, el('p', '比较数据保存在当前浏览器和域名下。个人主页可逐项细化并选择批量更新评分；私密收藏不导入。', 'bpr-muted'));

@@ -19,7 +19,7 @@ export interface Record extends Estimate {
 }
 export interface Data {
   version: 2; userId: number; revision: number; importedAt: string | null;
-  anchors: Anchor[]; comparisons: Comparison[]; records: Record[];
+  anchors: Anchor[]; unrated: Subject[]; comparisons: Comparison[]; records: Record[];
   config: { model: Model; shrinkage: number };
 }
 
@@ -27,7 +27,7 @@ export const validId = (n: unknown): n is number => Number.isSafeInteger(n) && N
 export const validRate = (n: unknown): n is number => Number.isInteger(n) && Number(n) >= 1 && Number(n) <= 10;
 export const eligible = (anchors: Anchor[], type: SubjectType) => new Set(anchors.filter(a => a.type === type && validId(a.id) && validRate(a.rate)).map(a => a.id)).size >= 50;
 export const emptyData = (userId: number): Data => ({
-  version: 2, userId, revision: 0, importedAt: null, anchors: [], comparisons: [], records: [],
+  version: 2, userId, revision: 0, importedAt: null, anchors: [], unrated: [], comparisons: [], records: [],
   config: { model: 'bt', shrinkage: 1 },
 });
 
@@ -64,7 +64,13 @@ export function parseBackup(value: unknown, userId: number): Data {
     ids.add(a.id);
     return { id: a.id, type: a.type, rate: a.rate, title: a.title, cover: safeCover(a.cover) };
   });
-  const types = new Map(out.anchors.map(a => [a.id, a.type]));
+  if (v.unrated !== undefined && (!Array.isArray(v.unrated) || v.unrated.length > 100000)) return fail();
+  out.unrated = (v.unrated ?? []).map(a => {
+    if (!a || !validId(a.id) || !validType(a.type) || typeof a.title !== 'string' || a.title.length > 1000 || ids.has(a.id)) return fail();
+    ids.add(a.id);
+    return { id: a.id, type: a.type, title: a.title, cover: safeCover(a.cover) };
+  });
+  const types = new Map([...out.anchors, ...out.unrated].map(a => [a.id, a.type]));
   const checkType = (id: number, type: SubjectType) => {
     if (types.has(id) && types.get(id) !== type) return fail();
     types.set(id, type);

@@ -1,10 +1,15 @@
 import { eligible } from './data.ts';
-import type { Anchor, Data, SubjectType } from './data.ts';
+import type { Anchor, Data, Subject, SubjectType } from './data.ts';
 import { estimate } from './model.ts';
 
-export function nextPoolPair(data: Data, type: SubjectType, goal = 3): [Anchor, Anchor] | null {
-  const pool = data.anchors.filter(a => a.type === type);
-  if (!eligible(pool, type)) return null;
+export type PoolSubject = Subject & { rate: number | null };
+export function refinementSubjects(data: Data, type: SubjectType): PoolSubject[] {
+  return [...data.anchors, ...data.unrated.map(a => ({ ...a, rate: null }))].filter(a => a.type === type);
+}
+
+export function nextPoolPair(data: Data, type: SubjectType, goal = 3): [PoolSubject, Anchor] | null {
+  const pool = refinementSubjects(data, type);
+  if (!eligible(data.anchors, type)) return null;
   const evidence = new Map(pool.map(a => [a.id, estimate(data, a.id, type)]));
   const attempts = new Map(pool.map(a => [a.id, 0]));
   const seen = new Map<string, number>();
@@ -18,7 +23,7 @@ export function nextPoolPair(data: Data, type: SubjectType, goal = 3): [Anchor, 
   const targets = pool.filter(a => evidence.get(a.id)!.useful < goal).sort((a, b) =>
     attempts.get(a.id)! - attempts.get(b.id)! || evidence.get(a.id)!.useful - evidence.get(b.id)!.useful || a.id - b.id);
   for (const target of targets) {
-    const reference = pool.filter(a => a.id !== target.id && (seen.get(pairKey(target.id, a.id)) ?? 0) < Math.ceil(goal / 3)).sort((a, b) =>
+    const reference = data.anchors.filter(a => a.type === type).filter(a => a.id !== target.id && (seen.get(pairKey(target.id, a.id)) ?? 0) < Math.ceil(goal / 3)).sort((a, b) =>
       Number(evidence.get(a.id)!.useful >= goal) - Number(evidence.get(b.id)!.useful >= goal) ||
       Math.abs(evidence.get(a.id)!.strength - evidence.get(target.id)!.strength) - Math.abs(evidence.get(b.id)!.strength - evidence.get(target.id)!.strength) ||
       attempts.get(a.id)! - attempts.get(b.id)! || a.id - b.id)[0];
@@ -45,11 +50,11 @@ export function pairProbabilities(data: Data, type: SubjectType, left: number, r
   return { target: counts.target / total, reference: counts.reference / total, tie: counts.tie / total, skip: counts.skip / total, observed };
 }
 
-export interface RatingChange { subject: Anchor; score: number; from: number; to: number }
+export interface RatingChange { subject: PoolSubject; score: number; from: number | null; to: number }
 export function ratingChanges(data: Data, type: SubjectType): RatingChange[] {
   if (!eligible(data.anchors, type)) return [];
   // Keep this review snapshot stable while a batch updates reference ratings.
-  return data.anchors.filter(a => a.type === type).flatMap(subject => {
+  return refinementSubjects(data, type).flatMap(subject => {
     const record = data.records.find(r => r.subjectId === subject.id && r.subjectType === type);
     return record && record.useful >= 3 && record.recommended !== subject.rate
       ? [{ subject, score: record.score, from: subject.rate, to: record.recommended }] : [];

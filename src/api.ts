@@ -45,8 +45,8 @@ export function subjectFromPage(id: number, root: ParentNode = document): Subjec
     cover: safeCover(root.querySelector('#bangumiInfo img.cover')?.getAttribute('src')) };
 }
 
-export async function getAnchors(username: string, progress: (n: number) => void = () => {}): Promise<Anchor[]> {
-  const byId = new Map<number, Anchor>();
+export async function getCollections(username: string, progress: (n: number) => void = () => {}): Promise<{ anchors: Anchor[]; unrated: Subject[] }> {
+  const byId = new Map<number, Anchor | Subject>();
   for (let offset = 0; offset < 100000; offset += 50) {
     const page = await get(`/users/${encodeURIComponent(username)}/collections?limit=50&offset=${offset}`);
     if (!Array.isArray(page.data) || !Number.isSafeInteger(page.total) || page.total < 0) throw new Error('公开收藏响应格式无效。');
@@ -55,12 +55,15 @@ export async function getAnchors(username: string, progress: (n: number) => void
       if (!validType(row.subject_type) || !validId(row.subject_id)) continue;
       // A later duplicate with rate=0 must also remove a stale earlier rating.
       byId.delete(row.subject_id);
-      if (validRate(row.rate)) byId.set(row.subject_id, { id: row.subject_id, type: row.subject_type, rate: row.rate,
+      if (validRate(row.rate) || row.rate === 0) byId.set(row.subject_id, { id: row.subject_id, type: row.subject_type, ...(validRate(row.rate) ? { rate: row.rate } : {}),
         title: String(row.subject?.name_cn || row.subject?.name || `条目 #${row.subject_id}`),
         cover: safeCover(row.subject?.images?.common) });
     }
     progress(byId.size);
-    if (offset + page.data.length >= page.total) return [...byId.values()];
+    if (offset + page.data.length >= page.total) return {
+      anchors: [...byId.values()].filter((a): a is Anchor => 'rate' in a),
+      unrated: [...byId.values()].filter(a => !('rate' in a)),
+    };
   }
   throw new Error('收藏数量超出导入上限。');
 }

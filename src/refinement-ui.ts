@@ -1,8 +1,8 @@
 import { categoryName, eligible } from './data.ts';
 import type { Data, Outcome, SubjectType } from './data.ts';
-import { getAnchors, loggedInUsername } from './api.ts';
+import { getCollections, loggedInUsername } from './api.ts';
 import { estimate, newComparison, recompute, recordEstimate } from './model.ts';
-import { nextPoolPair, pairProbabilities, ratingChanges } from './refinement.ts';
+import { nextPoolPair, pairProbabilities, ratingChanges, refinementSubjects } from './refinement.ts';
 import { publishRating } from './publish.ts';
 import { load, save } from './storage.ts';
 
@@ -62,12 +62,12 @@ export async function openRefinement(user: { id: number; username: string }): Pr
     });
   }
   async function refresh(): Promise<void> {
-    const anchors = await getAnchors(user.username, count => { status.textContent = `正在读取公开评分：${count} 个条目`; });
-    const next = structuredClone(data); next.anchors = anchors; next.importedAt = new Date().toISOString();
+    const collections = await getCollections(user.username, count => { status.textContent = `正在读取公开收藏：${count} 个条目`; });
+    const next = structuredClone(data); next.anchors = collections.anchors; next.unrated = collections.unrated; next.importedAt = new Date().toISOString();
     recompute(next); await persist(next); selected.clear(); notice = '';
   }
   function begin(): void {
-    const counts = data.anchors.filter(a => a.type === type).map(a => estimate(data, a.id, type).useful);
+    const counts = refinementSubjects(data, type).map(a => estimate(data, a.id, type).useful);
     const minimum = Math.min(...counts);
     goal = minimum < 3 ? 3 : minimum + 3;
     view = 'compare'; notice = '';
@@ -86,12 +86,17 @@ export async function openRefinement(user: { id: number; username: string }): Pr
         alive();
         const latest = await load(user.id);
         if (latest.revision !== data.revision) throw new Error('另一个标签页已更新本地数据，请重新加载后检查。');
-        status.textContent = `${completed + 1}/${changes.length} · ${change.subject.title} · ${change.from} → ${change.to}`;
+        status.textContent = `${completed + 1}/${changes.length} · ${change.subject.title} · ${change.from ?? '未评分'} → ${change.to}`;
         await publishRating(user.username, change.subject.id, change.from, change.to);
         completed++;
         // Once the server confirms success, save it even if the dialog was closed.
         const next = structuredClone(data);
-        next.anchors.find(a => a.id === change.subject.id)!.rate = change.to;
+        const anchor = next.anchors.find(a => a.id === change.subject.id);
+        if (anchor) anchor.rate = change.to;
+        else {
+          next.anchors.push({ ...change.subject, rate: change.to });
+          next.unrated = next.unrated.filter(a => a.id !== change.subject.id);
+        }
         const record = next.records.find(r => r.subjectId === change.subject.id)!;
         record.currentRating = change.to; record.lastPublishedRating = change.to;
         await save(next); data = next; selected.delete(change.subject.id);
@@ -104,15 +109,16 @@ export async function openRefinement(user: { id: number; username: string }): Pr
   }
 
   function renderCategory(): void {
-    content.append(el('p', '选择一个类别，依次比较已评分条目。每次选择会同时细化两侧评分，进度自动保存在本地。'));
+    content.append(el('p', '选择一个类别，依次比较已评分与未评分收藏。未评分条目与已评分条目比较，以估计首次评分，进度自动保存在本地。'));
     const label = el('label', '类别'); const select = el('select');
     for (const [id, name] of Object.entries(categoryName)) {
       const count = data.anchors.filter(a => a.type === Number(id)).length;
-      const option = el('option', `${name} · ${count} 个已评分条目`); option.value = id; select.append(option);
+      const unscored = data.unrated.filter(a => a.type === Number(id)).length;
+      const option = el('option', `${name} · ${count} 个已评分 / ${unscored} 个未评分`); option.value = id; select.append(option);
     }
     select.value = String(type); select.onchange = () => { type = Number(select.value) as SubjectType; selected.clear(); render(); };
     label.append(select); content.append(label);
-    const pool = data.anchors.filter(a => a.type === type);
+    const pool = refinementSubjects(data, type);
     const ready = pool.filter(a => estimate(data, a.id, type).useful >= 3).length;
     content.append(el('p', `${ready}/${pool.length} 个条目已有至少 3 次有效比较。各类别独立，需要至少 50 个已评分公开收藏。`, 'bpr-muted'));
     const actions = el('div', '', 'bpr-actions');
@@ -121,7 +127,7 @@ export async function openRefinement(user: { id: number; username: string }): Pr
     actions.append(start, review, button('导入 / 刷新公开评分', refresh)); content.append(actions);
   }
   function renderCompare(): void {
-    const pool = data.anchors.filter(a => a.type === type);
+    const pool = refinementSubjects(data, type);
     const done = pool.filter(a => estimate(data, a.id, type).useful >= goal).length;
     content.append(el('p', `${categoryName[type]} · ${done}/${pool.length} 个条目达到本轮 ${goal} 次有效比较`, 'bpr-subtitle'));
     const pair = nextPoolPair(data, type, goal);
@@ -136,7 +142,7 @@ export async function openRefinement(user: { id: number; username: string }): Pr
           const image = el('img'); image.src = subject.cover; image.alt = ''; image.referrerPolicy = 'no-referrer';
           image.onerror = () => image.remove(); card.append(image);
         }
-        card.append(el('h4', subject.title), el('p', `当前 ${subject.rate} 分`, 'bpr-muted')); cards.append(card);
+        card.append(el('h4', subject.title), el('p', subject.rate === null ? '当前未评分' : `当前 ${subject.rate} 分`, 'bpr-muted')); cards.append(card);
       }
       content.append(el('h3', '你更喜欢哪一部？'), cards);
       const probabilities = pairProbabilities(data, type, pair[0].id, pair[1].id);
@@ -171,8 +177,8 @@ export async function openRefinement(user: { id: number; username: string }): Pr
     const changes = ratingChanges(data, type);
     const ids = new Set(changes.map(c => c.subject.id));
     for (const id of selected) if (!ids.has(id)) selected.delete(id);
-    content.append(el('h3', `${categoryName[type]} · ${changes.length} 个整数评分变化`));
-    content.append(el('p', '仅列出至少有 3 次有效比较、且建议整数与当前公开评分不同的条目。两位小数是模型建议。'));
+    content.append(el('h3', `${categoryName[type]} · ${changes.length} 个评分建议`));
+    content.append(el('p', '仅列出至少有 3 次有效比较、且未评分或建议整数与当前公开评分不同的条目。两位小数是模型建议。'));
     if (notice) content.append(el('p', notice, 'bpr-result'));
     const actions = el('div', '', 'bpr-actions');
     const publish = button(`更新已选 ${selected.size} 个评分`, publishSelected, true); publish.disabled = selected.size === 0;
@@ -189,7 +195,7 @@ export async function openRefinement(user: { id: number; username: string }): Pr
         check.onchange = () => { if (check.checked) selected.add(change.subject.id); else selected.delete(change.subject.id); selectionChanged(); };
         cell.append(check); const title = el('td'); const link = el('a', change.subject.title);
         link.href = `/subject/${change.subject.id}`; link.target = '_blank'; link.rel = 'noopener'; title.append(link);
-        row.append(cell, title, el('td', String(change.from)), el('td', change.score.toFixed(2)), el('td', String(change.to))); body.append(row);
+        row.append(cell, title, el('td', change.from === null ? '未评分' : String(change.from)), el('td', change.score.toFixed(2)), el('td', String(change.to))); body.append(row);
       }
       table.append(body); const scroll = el('div', '', 'bpr-table-scroll'); scroll.append(table); content.append(scroll);
     } else content.append(el('p', '目前没有可更新的整数评分变化。继续比较可细化尚未达到 3 次有效比较的条目。'));

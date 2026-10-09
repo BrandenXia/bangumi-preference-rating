@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { emptyData, eligible, parseBackup } from '../src/data.ts';
 import { anchorStrength, calibrate, chooseReference, estimate, newComparison, recordEstimate, recompute } from '../src/model.ts';
-import { getAnchors, loggedInUsername, subjectFromPage } from '../src/api.ts';
+import { getCollections, loggedInUsername, subjectFromPage } from '../src/api.ts';
 
 const anchors = (count: number) => Array.from({ length: count }, (_, i) => ({ id: i + 1, type: 2 as const, rate: 1 + i % 10, title: `Anime ${i}`, cover: '' }));
 
@@ -69,7 +69,7 @@ test('backups isolate accounts, reject damaged values, and preserve raw history 
   assert.equal(data.records[0].originalRating, backup.records[0].originalRating);
 });
 
-test('public collection pagination filters types, removes zero ratings and deduplicates', async () => {
+test('public collection pagination filters types, keeps unscored subjects separate from anchors and deduplicates', async () => {
   const originalFetch = globalThis.fetch;
   const pages: number[] = [];
   globalThis.fetch = async (url) => {
@@ -79,10 +79,12 @@ test('public collection pagination filters types, removes zero ratings and dedup
     return new Response(JSON.stringify({ total: 53, data: rows }));
   };
   try {
-    const result = await getAnchors('test');
+    const result = await getCollections('test');
     assert.deepEqual(pages, [0, 50]);
-    assert.equal(result.length, 50);
-    assert.equal(result.some(a => a.id === 1 || a.id === 99), false);
+    assert.equal(result.anchors.length, 50);
+    assert.equal(result.unrated.length, 1);
+    assert.equal(result.unrated[0].id, 1);
+    assert.equal(result.anchors.some(a => a.id === 1 || a.id === 99), false);
   } finally { globalThis.fetch = originalFetch; }
 });
 
@@ -137,4 +139,29 @@ test('pair probabilities preserve contradictions, ties, skips and cyclic prefere
   for (let a = 1; a <= 50; a++) for (let b = a + 1; b <= 50; b++) full.comparisons.push(newComparison(a, b, 'skip', 2));
   assert.equal(nextPoolPair(full, 2, 3), null);
   assert.ok(nextPoolPair(full, 2, 6));
+});
+
+test('unscored collections receive first-score suggestions without becoming zero-rated anchors', async () => {
+  const { nextPoolPair, ratingChanges } = await import('../src/refinement.ts');
+  for (const model of ['bt', 'elo'] as const) {
+    const data = emptyData(1); data.config.model = model; data.anchors = anchors(49);
+    data.unrated = [{ id: 101, type: 2, title: 'Unscored', cover: '' }];
+    assert.equal(nextPoolPair(data, 2), null);
+    data.anchors = anchors(50);
+    for (let i = 0; i < 300; i++) {
+      const pair = nextPoolPair(data, 2); if (!pair) break;
+      assert.ok(data.anchors.some(a => a.id === pair[1].id));
+      data.comparisons.push(newComparison(pair[0].id, pair[1].id, 'tie', 2));
+      pair.forEach(a => recordEstimate(data, a.id, 2));
+    }
+    const change = ratingChanges(data, 2).find(c => c.subject.id === 101)!;
+    assert.ok(change); assert.equal(change.from, null);
+    assert.ok(change.to >= 1 && change.to <= 10);
+    assert.equal(data.records.find(r => r.subjectId === 101)!.originalRating, null);
+    assert.equal(data.anchors.length, 50);
+    assert.deepEqual(parseBackup(JSON.parse(JSON.stringify(data)), 1), data);
+    assert.throws(() => parseBackup({ ...data, unrated: [data.anchors[0]] }, 1));
+    const legacy = { ...data, unrated: undefined };
+    assert.deepEqual(parseBackup(legacy, 1).unrated, []);
+  }
 });
