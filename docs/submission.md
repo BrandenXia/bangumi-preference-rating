@@ -2,7 +2,7 @@
 
 Component: [个性化评分](https://bgm.tv/dev/app/7267)
 
-Local version: **0.3.0**. Bangumi currently has [0.2.2](https://bgm.tv/dev/app/7267/gadget/3887); uploading 0.3.0 is pending a signed-in browser session.
+Development version: [0.3.0](https://bangumi.tv/dev/app/7267/gadget/3887).
 
 The updated version is enabled for the author and submitted for public review (审核中). The own-profile refinement entry appears below rating statistics, and supports category comparisons and confirmed selected batch updates. Subject preference scoring appears below the default rating chart in the collection panel; the floating window follows Bangumi typography and theme colors.
 
@@ -19,3 +19,5 @@ Version 0.2.2 restricts imported scoring references and targets to completed pub
 Release scope: local preference scoring using completed public collections. Selected score updates use the signed-in native collection form and verify each result. Private collection imports remain deferred. The window works for adult subjects using metadata already visible in the page; public API access rules remain unchanged.
 
 Version 0.3.0 adds the own-profile refined-rating ranking panel and adjustable score spread, defaulting to 2× latent deviations about each category mean. Completed-only scope and category gates remain unchanged. Scores and integer suggestions are recomputed from saved comparisons; publication stays selected and confirmed.
+
+The saved 0.3.0 bundle was compared with the local build. Signed-in native checks verified the homepage ranking entry, completed-only table and spread controls. The version is submitted for review (审核中). Mock rankings demonstrated original range 5.00–6.82 versus default expanded range 4.10–7.68, with unchanged ordering and matching batch-review suggestions.
