@@ -1,3 +1,4 @@
+import { eligible } from './data.ts';
 import type { Anchor, Comparison, Data, Estimate, SubjectType } from './data.ts';
 
 const sigmoid = (x: number) => 1 / (1 + Math.exp(-x));
@@ -68,21 +69,11 @@ function latentEstimate(data: Data, subjectId: number, type: SubjectType, anchor
     range: data.config.model === 'bt' ? [theta - 1.96 * spread, theta + 1.96 * spread] : null };
 }
 
-// A category-relative suggestion scale: 9 starts at the top 2.5%.
-// Automatic suggestions stop at 9; only the user can choose 10 on Bangumi.
-// Spread changes the middle of the scale, never these rare-score thresholds.
-export function scoreAtPercentile(percentile: number, spread: Data['config']['spread']): number {
-  const knots = [[0, 4], [0.1, 6 - spread / 2], [0.5, 6], [0.9, 6 + spread / 2], [0.975, 8.5], [1, 9]];
-  const p = clamp(percentile, 0, 1);
-  for (let i = 1; i < knots.length; i++) {
-    const [right, high] = knots[i], [left, low] = knots[i - 1];
-    if (p <= right) return low + (high - low) * (p - left) / (right - left);
-  }
-  return 9;
-}
-
 export function estimateCategory(data: Data, type: SubjectType, extraIds: number[] = []): Map<number, Estimate> {
   const anchors = new Map(data.anchors.filter(a => a.type === type).map(a => [a.id, anchorStrength(a.rate)]));
+  const ratings = new Map(data.anchors.filter(a => a.type === type).map(a => [a.id, a.rate]));
+  const meanRating = ratings.size ? [...ratings.values()].reduce((a, b) => a + b, 0) / ratings.size : 6;
+  const canRefine = eligible(data.anchors, type);
   const center = anchors.size ? [...anchors.values()].reduce((a, b) => a + b, 0) / anchors.size : 0;
   const pool = [...anchors.keys(), ...data.unrated.filter(a => a.type === type).map(a => a.id)];
   const raw = new Map([...new Set([...pool, ...extraIds])].map(id => [id, latentEstimate(data, id, type, anchors, center)]));
@@ -108,8 +99,21 @@ export function estimateCategory(data: Data, type: SubjectType, extraIds: number
     }
     return 1;
   };
-  const scoreFor = (strength: number) => scoreAtPercentile(percentile(strength), data.config.spread);
   return new Map([...raw].map(([id, result]) => {
+    const rating = ratings.get(id);
+    const baseline = rating ?? meanRating;
+    const prior = anchors.get(id) ?? center;
+    // Preserve imported ratings exactly; gradually apply only this subject's
+    // preference change. Spread scales the change, never the starting rating.
+    const weight = canRefine ? result.useful / (result.useful + 8) : 0;
+    const scoreFor = (strength: number): number => {
+      if (!weight || rating === 10) return baseline;
+      const delta = (calibrate(strength).score - calibrate(prior).score) * data.config.spread * weight;
+      let value = clamp(baseline + delta, (rating === undefined ? 4 : Math.min(baseline, 4)), 9);
+      // Reserve newly suggested 9s for the top ~1/40. Existing 9s/10s are user choices.
+      if ((rating ?? 0) < 9 && value >= 8.5 && percentile(result.strength) < 0.975) value = 8.49;
+      return value;
+    };
     const score = scoreFor(result.strength);
     // Rounding weights for the displayed suggestion, not posterior confidence.
     const probabilities = Array(10).fill(0) as number[];
@@ -117,7 +121,7 @@ export function estimateCategory(data: Data, type: SubjectType, extraIds: number
     probabilities[lower - 1] = 1 - (score - lower);
     if (lower < 10) probabilities[lower] = score - lower;
     return [id, { ...result, score, probabilities, recommended: Math.round(score),
-      range: result.range ? [scoreFor(result.range[0]), scoreFor(result.range[1])] as [number, number] : null }];
+      range: weight && rating !== 10 && result.range ? [scoreFor(result.range[0]), scoreFor(result.range[1])] as [number, number] : null }];
   }));
 }
 
@@ -137,13 +141,13 @@ export function recordEstimate(data: Data, subjectId: number, type: SubjectType,
   const result = { ...(estimated ?? estimate(data, subjectId, type)), subjectId, subjectType: type,
     originalRating: previous ? previous.originalRating : current, currentRating: current,
     lastPublishedRating: previous?.lastPublishedRating ?? null,
-    model: data.config.model, modelVersion: 1 as const, calibration: 'category-tail-v3' as const,
+    model: data.config.model, modelVersion: 1 as const, calibration: 'rating-baseline-v4' as const,
     updatedAt: new Date().toISOString() };
   data.records = [...data.records.filter(r => r.subjectId !== subjectId), result];
 }
 
 export function recompute(data: Data): void {
-  const targets = new Map([...data.records.map(r => [r.subjectId, r.subjectType] as const),
+  const targets = new Map([...data.anchors.map(a => [a.id, a.type] as const), ...data.records.map(r => [r.subjectId, r.subjectType] as const),
     ...data.comparisons.flatMap(c => [[c.target, c.subjectType] as const, [c.reference, c.subjectType] as const]),
     ...data.manualOrders.flatMap(order => order.subjects.map(id => [id, order.subjectType] as const))]);
   for (const type of new Set(targets.values())) {

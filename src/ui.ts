@@ -171,7 +171,8 @@ export async function openPanel(user: { id: number; username: string }, subject:
     const old = data.records.find(r => r.subjectId === subject.id)?.originalRating;
     const current = data.anchors.find(a => a.id === subject.id)?.rate;
     const score = el('div', '', 'bpr-score');
-    score.append(el('strong', result.useful >= 3 ? result.score.toFixed(2) : '—'), el('span', result.useful >= 3 ? '初步建议 · 本地评分' : `再比较 ${3 - result.useful} 次查看初步建议`));
+    const visible = current !== undefined || result.useful >= 3;
+    score.append(el('strong', visible ? result.score.toFixed(2) : '—'), el('span', visible ? result.useful ? '细化评分 · 本地建议' : '起点评分 · 保留现有评分' : `再比较 ${3 - result.useful} 次查看初步建议`));
     content.append(score);
     content.append(el('p', `${result.useful >= 3 ? `建议整数 ${result.recommended} · ` : ''}${result.useful} 次有效比较 · 公开评分 ${current ?? '未评分'}${old != null && old !== current ? `（最初 ${old}）` : ''}`, 'bpr-muted'));
     if (result.useful >= 3 && result.range) content.append(el('p', `模型敏感性范围 ${result.range[0].toFixed(2)}–${result.range[1].toFixed(2)}，不是校准后的置信区间。`, 'bpr-muted'));

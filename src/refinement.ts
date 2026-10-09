@@ -93,7 +93,7 @@ export function rankedSubjects(data: Data, type: SubjectType, useManual = true):
   const estimates = estimateCategory(data, type);
   const rows = refinementSubjects(data, type).map(subject => {
     const result = estimates.get(subject.id)!;
-    return { subject, result: ready && result.useful >= 3 ? result : null, rank: null as number | null };
+    return { subject, result: (subject.rate !== null || ready && result.useful >= 3) ? result : null, rank: null as number | null };
   }).sort((a, b) => Number(b.result !== null) - Number(a.result !== null) ||
     (b.result?.score ?? 0) - (a.result?.score ?? 0) || a.subject.id - b.subject.id);
   let rank = 0;

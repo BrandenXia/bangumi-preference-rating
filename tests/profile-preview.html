@@ -16,6 +16,7 @@ main { max-width:980px; margin:30px auto; display:grid; grid-template-columns:1f
 <a href="/tests/profile-preview.html?other=1">模拟其他用户主页</a> · <a href="/tests/profile-preview.html">模拟自己主页</a>
 <pre id="test-result">尚未写入</pre></section><aside id="columnB"><div class="menu_inner userStats"><h2>评分统计</h2><div id="userStatsContainers">动画 50 · 游戏 50 · 书籍 0</div></div></aside></main>
 <script>
+  const fixtureId = Number(new URLSearchParams(location.search).get('fresh')) || 999999;
   history.replaceState({}, '', new URLSearchParams(location.search).has('other') ? '/user/other' : '/user/preview');
   const names = ['春日来信','银河之旅','雨后的车站','夏夜航线','远方的朋友','山间日记','深海之声','彼方天空','小镇时光','风起之时'];
   const subjects = Array.from({ length:100 }, (_, i) => ({ subject_id:i+1, subject_type:i<50?2:4, type:2, rate:6, subject:{name_cn:names[i%10]+' '+(i+1),images:{}} }));
@@ -26,7 +27,7 @@ main { max-width:980px; margin:30px auto; display:grid; grid-template-columns:1f
   window.fetch = async (input, init = {}) => {
     const url = new URL(input, location.href); const path = url.pathname;
     const scenario = document.querySelector('#scenario').value;
-    if (path === '/v0/users/preview') return new Response(JSON.stringify({ id:999999 }));
+    if (path === '/v0/users/preview') return new Response(JSON.stringify({ id:fixtureId }));
     if (path === '/v0/users/other') return new Response(JSON.stringify({ id:888888 }));
     if (path === '/v0/users/preview/collections') {
       const offset=Number(url.searchParams.get('offset'));

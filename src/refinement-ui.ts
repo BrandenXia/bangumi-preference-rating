@@ -117,7 +117,7 @@ export async function openRefinement(user: { id: number; username: string }, ini
 
   function spreadControl(container: HTMLElement = content, compact = false): void {
     const label = el('label', '评分展开程度'); const select = el('select');
-    for (const [value, name] of [[1, '较集中'], [1.5, '适度展开'], [2, '展开（默认）'], [3, '更大幅度']] as const) {
+    for (const [value, name] of [[1, '小幅细化'], [1.5, '适度细化'], [2, '默认细化'], [3, '更大调整']] as const) {
       const option = el('option', name); option.value = String(value); select.append(option);
     }
     select.value = String(data.config.spread);
@@ -126,7 +126,7 @@ export async function openRefinement(user: { id: number; username: string }, ini
       recompute(next); await persist(next); selected.clear(); notice = '';
     });
     label.append(select);
-    const explanation = el('p', '按类别分布展开中段分差，最低 4 分；9 分约占 1/40；10 分仅由你在 Bangumi 手动决定。并列条目同分，比例为目标而非硬配额。只调整本地建议，确认批量更新后才写入 Bangumi。', 'bpr-muted');
+    const explanation = el('p', '现有评分原样作为起点，比较后逐渐细化；展开程度只放大调整量。新建议一般为 4–9 分，新增 9 分仅限前约 1/40；原有低分和手动 10 分保留。未评分条目需 3 次有效比较，所有写入仍需确认。', 'bpr-muted');
     if (compact) { const details = el('details'); details.append(el('summary', '评分规则（4–9 分）'), explanation); container.append(label, details); }
     else container.append(label, explanation);
   }
@@ -157,8 +157,8 @@ export async function openRefinement(user: { id: number; username: string }, ini
     if (draftOrder) content.append(el('p', '手动排列预览 · 尚未保存', 'bpr-subtitle'));
 
     const ranked = rows.filter(row => row.result);
-    content.append(el('p', `${categoryName[type]} · ${ranked.length}/${rows.length} 个已完成条目已有偏好评分，${manual ? '手动顺序（评分由模型计算）' : '按模型分数降序排列，同分同名次'}；不足 3 次有效比较的条目暂不显示评分。`, 'bpr-muted'));
-    if (!eligible(data.anchors, type)) content.append(el('p', '此类别不足 50 个已评分且已完成的公开收藏，暂不能生成偏好排名。', 'bpr-muted'));
+    content.append(el('p', `${categoryName[type]} · ${ranked.length}/${rows.length} 个已完成条目可显示评分，${manual ? '手动顺序（评分由模型计算）' : '按模型分数降序排列，同分同名次'}；已评分条目立即显示起点或细化分数；未评分条目需 3 次有效比较。`, 'bpr-muted'));
+    if (!eligible(data.anchors, type)) content.append(el('p', '此类别不足 50 个已评分且已完成的公开收藏，先显示现有评分，暂不能进行比较细化。', 'bpr-muted'));
     if (ranked.length) content.append(el('p', `当前分布：${Math.min(...ranked.map(row => row.result!.score)).toFixed(2)}–${Math.max(...ranked.map(row => row.result!.score)).toFixed(2)}`, 'bpr-subtitle'));
     if (rows.length) {
       const table = el('table', '', 'bpr-review'); const head = el('tr');

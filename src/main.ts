@@ -73,7 +73,8 @@ function start(): void {
           const currentData = await load(user.id); selectedModel = currentData.config.model;
           if (![...currentData.anchors, ...currentData.unrated].some(a => a.id === subject!.id)) { summary.textContent = '仅为已完成的公开收藏评分 · 刷新收藏后比较'; return; }
           const record = currentData.records.find(r => r.subjectId === subject!.id);
-          summary.textContent = record ? record.useful >= 3 ? `${estimate(currentData, subject!.id, subject!.type).score.toFixed(2)} · 初步建议` : `${record.useful} 次比较 · 继续评分` : '比较几个条目，找到你的评分';
+          const anchor = currentData.anchors.find(a => a.id === subject!.id);
+          summary.textContent = anchor || (record && record.useful >= 3) ? `${estimate(currentData, subject!.id, subject!.type).score.toFixed(2)} · ${record?.useful ? '细化评分' : '起点评分'}` : `${record?.useful ?? 0} 次比较 · 继续评分`;
         } catch { summary.textContent = '本地数据读取失败'; }
       }
       button.onclick = () => void openPanel(user, subject, () => void refreshLabel());

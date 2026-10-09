@@ -2,7 +2,7 @@
 
 Component: [个性化评分](https://bgm.tv/dev/app/7267)
 
-Development version: [0.3.4](https://bangumi.tv/dev/app/7267/gadget/3887).
+Development version: [0.3.5](https://bangumi.tv/dev/app/7267/gadget/3887).
 
 The updated version is enabled for the author and submitted for public review (审核中). The own-profile refinement entry appears below rating statistics, and supports category comparisons and confirmed selected batch updates. Subject preference scoring appears below the default rating chart in the collection panel; the floating window follows Bangumi typography and theme colors.
 
@@ -37,3 +37,7 @@ The saved 0.3.3 bundle matches the local build and is submitted for review (审�
 Version 0.3.4 retains exact manual display order while BT/Elo scoring stays active. Saving a changed arrangement adds preference observations only for crossed pairs, leaving prior contradictory choices intact. Manual and model views can be switched without erasing the saved order. Scores and batch suggestions again require three useful observations; manual positions no longer override model estimates.
 
 The saved 0.3.4 bundle matches the local build and is submitted for review (审核中). Core checks cover both models updating scores while preserving order. Mock checks verify view switching, a later continuous choice, reload persistence and model-based batch review. Native controls and updated explanation were verified without changing real preferences or ratings.
+
+Version 0.3.5 preserves imported ratings exactly as starting scores, then gradually applies evidence-weighted adjustments. Spread affects adjustments only; existing low ratings and user-chosen 10s remain intact. Rated entries appear immediately, while unscored estimates and batch suggestions still require three useful comparisons. Saved manual display order remains independent of model scores.
+
+The saved 0.3.5 bundle matches the local build and is submitted for review (审核中). Native verification found all 344 rated anime unchanged at initialization and zero batch-update suggestions. Mock checks confirmed gradual refinement; all 12 core test groups, TypeScript and build checks pass. No real preferences or ratings were changed during this release check.
