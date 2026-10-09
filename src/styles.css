@@ -48,3 +48,5 @@ html[data-theme="dark"] #bpr-entry, html[data-theme="dark"] #bpr-home-entry, htm
 #bpr-dialog .bpr-review a { color: var(--bpr-link); }
 #bpr-dialog .bpr-review input { accent-color: var(--primary-color, #f09199); }
 #bpr-dialog .bpr-result { padding: 10px; border: 1px solid var(--bpr-border); border-radius: 5px; }
+
+#bpr-dialog .bpr-ranking-table { max-height: 40vh; overflow: auto; }

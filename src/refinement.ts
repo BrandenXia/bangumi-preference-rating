@@ -1,5 +1,5 @@
 import { eligible } from './data.ts';
-import type { Anchor, Data, Subject, SubjectType } from './data.ts';
+import type { Anchor, Data, Subject, SubjectType, Estimate } from './data.ts';
 import { estimate } from './model.ts';
 
 export type PoolSubject = Subject & { rate: number | null };
@@ -59,4 +59,20 @@ export function ratingChanges(data: Data, type: SubjectType): RatingChange[] {
     return record && record.useful >= 3 && record.recommended !== subject.rate
       ? [{ subject, score: record.score, from: subject.rate, to: record.recommended }] : [];
   });
+}
+
+export function rankedSubjects(data: Data, type: SubjectType): { subject: PoolSubject; result: Estimate | null; rank: number | null }[] {
+  const ready = eligible(data.anchors, type);
+  const rows = refinementSubjects(data, type).map(subject => {
+    const result = estimate(data, subject.id, type);
+    return { subject, result: ready && result.useful >= 3 ? result : null, rank: null as number | null };
+  }).sort((a, b) => Number(b.result !== null) - Number(a.result !== null) ||
+    (b.result?.score ?? 0) - (a.result?.score ?? 0) || a.subject.id - b.subject.id);
+  let rank = 0;
+  rows.forEach((row, i) => {
+    if (!row.result) return;
+    if (i === 0 || Math.abs(row.result.score - rows[i - 1].result!.score) > 1e-9) rank = i + 1;
+    row.rank = rank;
+  });
+  return rows;
 }

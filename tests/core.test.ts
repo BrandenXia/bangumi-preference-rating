@@ -169,3 +169,37 @@ test('unscored collections receive first-score suggestions without becoming zero
     assert.deepEqual(parseBackup(legacy, 1).unrated, []);
   }
 });
+
+test('category rankings sort refined scores, preserve ties and keep unsupported entries unranked; spread widens scores', async () => {
+  const { rankedSubjects } = await import('../src/refinement.ts');
+  for (const model of ['bt', 'elo'] as const) {
+    const data = emptyData(1); data.config.model = model;
+    data.anchors = anchors(50).map(a => ({ ...a, rate: 7 }));
+    data.unrated = [{ id: 101, type: 2, title: 'Pending', cover: '' }];
+    for (const id of [1,2,3,4]) for (const reference of [11,12,13]) {
+      data.comparisons.push(newComparison(id, reference, id === 1 ? 'target' : id === 2 ? 'reference' : 'tie', 2));
+    }
+    const history = structuredClone(data.comparisons);
+    data.config.spread = 1;
+    const narrow = estimate(data, 1, 2).score - estimate(data, 2, 2).score;
+    const oldOrder = rankedSubjects(data, 2).filter(r => r.result).map(r => r.subject.id);
+    data.config.spread = 3; recompute(data);
+    const rows = rankedSubjects(data, 2); const supported = rows.filter(r => r.result);
+    assert.ok(estimate(data, 1, 2).score - estimate(data, 2, 2).score > narrow * 1.8);
+    assert.deepEqual(supported.map(r => r.subject.id), oldOrder);
+    assert.equal(rows.find(r => r.subject.id === 3)!.rank, rows.find(r => r.subject.id === 4)!.rank);
+    assert.equal(rows.find(r => r.subject.id === 101)!.rank, null);
+    assert.equal(rows.find(r => r.subject.id === 50)!.result, null);
+    assert.equal(rankedSubjects(data, 4).length, 0);
+    assert.deepEqual(data.comparisons, history);
+    for (const row of supported) {
+      const r = row.result!;
+      assert.ok(r.score >= 1 && r.score <= 10);
+      assert.ok(Math.abs(r.probabilities.reduce((s, p, i) => s + p * (i + 1), 0) - r.score) < 1e-9);
+      if (r.range) assert.ok(r.range[0] <= r.score && r.range[1] >= r.score);
+    }
+    assert.deepEqual(parseBackup(JSON.parse(JSON.stringify(data)), 1), data);
+    assert.equal(parseBackup({ ...data, config: { model, shrinkage: 1 } }, 1).config.spread, 2);
+    assert.throws(() => parseBackup({ ...data, config: { ...data.config, spread: 99 } }, 1));
+  }
+});

@@ -110,7 +110,7 @@ export async function openPanel(user: { id: number; username: string }, subject:
 
   async function changeConfig(model: Model, shrinkage: number): Promise<void> {
     if (model === data.config.model && shrinkage === data.config.shrinkage) return;
-    const next = structuredClone(data); next.config = { model, shrinkage }; recompute(next);
+    const next = structuredClone(data); next.config = { ...next.config, model, shrinkage }; recompute(next);
     const preview = subject ? next.records.find(r => r.subjectId === subject.id)?.score : undefined;
     if (!await confirmLocal(`重新计算 ${next.records.length} 个本地评分${preview === undefined ? '' : `，当前条目预览：${preview.toFixed(2)}`}？比较历史保留，Bangumi 评分不变。`)) return;
     await update(next); currentReference = null;
@@ -233,7 +233,7 @@ export async function openPanel(user: { id: number; username: string }, subject:
   }
 
   try {
-    data = await load(user.id);
+    data = await load(user.id); recompute(data);
     if (!dialog.isConnected) return;
     seen = new Set(data.comparisons.filter(c => c.target === subject?.id || c.reference === subject?.id)
       .map(c => c.target === subject?.id ? c.reference : c.target));

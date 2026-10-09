@@ -2,7 +2,7 @@ import { categoryName, eligible } from './data.ts';
 import type { Data, Outcome, SubjectType } from './data.ts';
 import { getCollections, loggedInUsername } from './api.ts';
 import { estimate, newComparison, recompute, recordEstimate } from './model.ts';
-import { nextPoolPair, pairProbabilities, ratingChanges, refinementSubjects } from './refinement.ts';
+import { nextPoolPair, pairProbabilities, ratingChanges, refinementSubjects, rankedSubjects } from './refinement.ts';
 import { publishRating } from './publish.ts';
 import { load, save } from './storage.ts';
 
@@ -10,7 +10,7 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, text = '', className 
   const node = document.createElement(tag); node.textContent = text; node.className = className; return node;
 }
 
-export async function openRefinement(user: { id: number; username: string }): Promise<void> {
+export async function openRefinement(user: { id: number; username: string }, initialView: 'category' | 'ranking' = 'category'): Promise<void> {
   if (document.querySelector('#bpr-dialog')) return;
   const opener = document.activeElement as HTMLElement | null;
   const dialog = el('dialog'); dialog.id = 'bpr-dialog';
@@ -26,7 +26,7 @@ export async function openRefinement(user: { id: number; username: string }): Pr
   dialog.addEventListener('cancel', event => { if (publishing) { event.preventDefault(); stop = true; } });
   let data: Data;
   let type: SubjectType = 2;
-  let view: 'category' | 'compare' | 'review' = 'category';
+  let view: 'category' | 'compare' | 'review' | 'ranking' = initialView;
   let goal = 3;
   let busy = false;
   let publishing = false;
@@ -108,6 +108,48 @@ export async function openRefinement(user: { id: number; username: string }): Pr
     } finally { publishing = false; close.textContent = '关闭'; }
   }
 
+  function spreadControl(): void {
+    const label = el('label', '评分展开程度'); const select = el('select');
+    for (const [value, name] of [[1, '原始幅度'], [1.5, '适度展开'], [2, '展开（默认）'], [3, '更大幅度']] as const) {
+      const option = el('option', name); option.value = String(value); select.append(option);
+    }
+    select.value = String(data.config.spread);
+    select.onchange = () => void action(async () => {
+      const next = structuredClone(data); next.config.spread = Number(select.value);
+      recompute(next); await persist(next); selected.clear(); notice = '';
+    });
+    label.append(select); content.append(label, el('p', '围绕各类别平均偏好展开分差，保持模型顺序与 1–10 分范围。只调整本地建议；确认批量更新后才写入 Bangumi。', 'bpr-muted'));
+  }
+  function renderRanking(): void {
+    heading.textContent = '偏好排名';
+    const label = el('label', '排名类别'); const select = el('select');
+    for (const [id, name] of Object.entries(categoryName)) { const option = el('option', name); option.value = id; select.append(option); }
+    select.value = String(type); select.onchange = () => { type = Number(select.value) as SubjectType; selected.clear(); render(); };
+    label.append(select); content.append(label); spreadControl();
+    const rows = rankedSubjects(data, type);
+    const ranked = rows.filter(row => row.result);
+    content.append(el('p', `${categoryName[type]} · ${ranked.length}/${rows.length} 个已完成条目已有偏好评分，按未四舍五入的分数从高到低排列。同分同名次；不足 3 次有效比较的条目列在末尾。`, 'bpr-muted'));
+    if (!eligible(data.anchors, type)) content.append(el('p', '此类别不足 50 个已评分且已完成的公开收藏，暂不能生成偏好排名。', 'bpr-muted'));
+    if (ranked.length) content.append(el('p', `当前分布：${ranked.at(-1)!.result!.score.toFixed(2)}–${ranked[0].result!.score.toFixed(2)}`, 'bpr-subtitle'));
+    if (rows.length) {
+      const table = el('table', '', 'bpr-review'); const head = el('tr');
+      for (const title of ['名次', '条目', '当前', '偏好评分', '有效比较']) head.append(el('th', title));
+      const thead = el('thead'); thead.append(head); table.append(thead); const body = el('tbody');
+      for (const row of rows) {
+        const tr = el('tr'); const title = el('td'); const link = el('a', row.subject.title);
+        link.href = `/subject/${row.subject.id}`; link.target = '_blank'; link.rel = 'noopener'; title.append(link);
+        tr.append(el('td', row.rank === null ? '—' : String(row.rank)), title,
+          el('td', row.subject.rate === null ? '未评分' : String(row.subject.rate)),
+          el('td', row.result ? row.result.score.toFixed(2) : '待比较'),
+          el('td', String(estimate(data, row.subject.id, type).useful))); body.append(tr);
+      }
+      table.append(body); const scroll = el('div', '', 'bpr-table-scroll bpr-ranking-table'); scroll.append(table); content.append(scroll);
+    } else content.append(el('p', '先导入已完成的公开收藏，再开始比较。'));
+    const actions = el('div', '', 'bpr-actions');
+    const compare = button('继续逐项比较', async () => { begin(); }, true); compare.disabled = !eligible(data.anchors, type);
+    const review = button('检查评分变化', async () => { view = 'review'; }); review.disabled = !eligible(data.anchors, type);
+    actions.append(compare, review, button('刷新当前评分', refresh), button('返回类别', async () => { view = 'category'; })); content.append(actions);
+  }
   function renderCategory(): void {
     content.append(el('p', '选择一个类别，依次比较已完成的收藏（已评分或未评分）。未评分条目与已评分条目比较，以估计首次评分，进度自动保存在本地。'));
     const label = el('label', '类别'); const select = el('select');
@@ -117,14 +159,14 @@ export async function openRefinement(user: { id: number; username: string }): Pr
       const option = el('option', `${name} · ${count} 个已评分 / ${unscored} 个未评分`); option.value = id; select.append(option);
     }
     select.value = String(type); select.onchange = () => { type = Number(select.value) as SubjectType; selected.clear(); render(); };
-    label.append(select); content.append(label);
+    label.append(select); content.append(label); spreadControl();
     const pool = refinementSubjects(data, type);
     const ready = pool.filter(a => estimate(data, a.id, type).useful >= 3).length;
     content.append(el('p', `${ready}/${pool.length} 个条目已有至少 3 次有效比较。各类别独立，需要至少 50 个已评分且已完成的公开收藏。`, 'bpr-muted'));
     const actions = el('div', '', 'bpr-actions');
     const start = button('开始 / 继续逐项比较', async () => { begin(); }, true); start.disabled = !eligible(data.anchors, type);
     const review = button('查看评分变化', async () => { view = 'review'; }); review.disabled = !eligible(data.anchors, type);
-    actions.append(start, review, button('导入 / 刷新公开评分', refresh)); content.append(actions);
+    actions.append(start, review, button('查看偏好排名', async () => { view = 'ranking'; }), button('导入 / 刷新公开评分', refresh)); content.append(actions);
   }
   function renderCompare(): void {
     const pool = refinementSubjects(data, type);
@@ -164,7 +206,7 @@ export async function openRefinement(user: { id: number; username: string }): Pr
       recordEstimate(next, last.target, type); recordEstimate(next, last.reference, type); await persist(next);
     }); undo.disabled = !last;
     const actions = el('div', '', 'bpr-actions');
-    actions.append(undo, button('先检查已有变化', async () => { view = 'review'; }), button('返回类别', async () => { view = 'category'; }));
+    actions.append(undo, button('查看偏好排名', async () => { view = 'ranking'; }), button('先检查已有变化', async () => { view = 'review'; }), button('返回类别', async () => { view = 'category'; }));
     content.append(actions, el('p', '选择可以矛盾或形成循环；保留全部历史，不要求严格排序。差不多计入比较，跳过不计入。检查并确认后才修改 Bangumi 评分。', 'bpr-muted'));
   }
   function renderReview(): void {
@@ -200,15 +242,17 @@ export async function openRefinement(user: { id: number; username: string }): Pr
       table.append(body); const scroll = el('div', '', 'bpr-table-scroll'); scroll.append(table); content.append(scroll);
     } else content.append(el('p', '目前没有可更新的整数评分变化。继续比较可细化尚未达到 3 次有效比较的条目。'));
     const navigation = el('div', '', 'bpr-actions');
-    navigation.append(button('继续比较', async () => { if (!nextPoolPair(data, type, goal)) begin(); else view = 'compare'; }),
+    navigation.append(button('查看偏好排名', async () => { view = 'ranking'; }), button('继续比较', async () => { if (!nextPoolPair(data, type, goal)) begin(); else view = 'compare'; }),
       button('刷新当前评分', refresh), button('返回类别', async () => { view = 'category'; })); content.append(navigation);
   }
   function render(): void {
     close.disabled = false;
     if (!data) return;
     content.replaceChildren();
-    if (view === 'category') renderCategory(); else if (view === 'compare') renderCompare(); else renderReview();
+    heading.textContent = '逐项细化评分';
+    if (view === 'ranking') renderRanking(); else if (view === 'category') renderCategory(); else if (view === 'compare') renderCompare(); else renderReview();
+    dialog.scrollTop = 0;
   }
-  try { data = await load(user.id); alive(); render(); }
+  try { data = await load(user.id); recompute(data); alive(); render(); }
   catch (error) { content.textContent = error instanceof Error ? error.message : '本地数据无法读取。'; }
 }

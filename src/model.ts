@@ -28,7 +28,8 @@ export function anchorStrength(rate: number): number {
 
 export function estimate(data: Data, subjectId: number, type: SubjectType): Estimate {
   const anchors = new Map(data.anchors.filter(a => a.type === type).map(a => [a.id, anchorStrength(a.rate)]));
-  const prior = anchors.get(subjectId) ?? (anchors.size ? [...anchors.values()].reduce((a, b) => a + b, 0) / anchors.size : 0);
+  const center = anchors.size ? [...anchors.values()].reduce((a, b) => a + b, 0) / anchors.size : 0;
+  const prior = anchors.get(subjectId) ?? center;
   // A choice refines both rated entries; store the event once and reverse its outcome
   // when this entry appeared on the right. Unrated references remain unusable priors.
   const observations = data.comparisons.filter(c => c.subjectType === type && c.outcome !== 'skip').flatMap(c => {
@@ -63,12 +64,15 @@ export function estimate(data: Data, subjectId: number, type: SubjectType): Esti
       if (Math.abs(step) < 1e-7) break;
     }
   }
-  const calibrated = calibrate(theta);
+  // Stretch latent preferences around this category's mean without changing
+  // evidence, pair probabilities or ordering. The ordinal map keeps 1–10 bounds.
+  const scale = (strength: number) => center + (strength - center) * data.config.spread;
+  const calibrated = calibrate(scale(theta));
   // Conditional Laplace curvature with a noise floor, explicitly a sensitivity range.
   const spread = Math.sqrt(1 / precision + 0.5);
   return { strength: theta, ...calibrated, useful: observations.length,
     recommended: clamp(Math.round(calibrated.score), 1, 10),
-    range: data.config.model === 'bt' ? [calibrate(theta - 1.96 * spread).score, calibrate(theta + 1.96 * spread).score] : null };
+    range: data.config.model === 'bt' ? [calibrate(scale(theta - 1.96 * spread)).score, calibrate(scale(theta + 1.96 * spread)).score] : null };
 }
 
 export function chooseReference(anchors: Anchor[], target: number, strength: number, seen: Set<number>): Anchor | undefined {
@@ -83,7 +87,7 @@ export function recordEstimate(data: Data, subjectId: number, type: SubjectType)
   const result = { ...estimate(data, subjectId, type), subjectId, subjectType: type,
     originalRating: previous ? previous.originalRating : current, currentRating: current,
     lastPublishedRating: previous?.lastPublishedRating ?? null,
-    model: data.config.model, modelVersion: 1 as const, calibration: 'fixed-ordinal-v1' as const,
+    model: data.config.model, modelVersion: 1 as const, calibration: 'spread-ordinal-v2' as const,
     updatedAt: new Date().toISOString() };
   data.records = [...data.records.filter(r => r.subjectId !== subjectId), result];
 }

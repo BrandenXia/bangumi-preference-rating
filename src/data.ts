@@ -15,12 +15,12 @@ export interface Estimate {
 export interface Record extends Estimate {
   subjectId: number; subjectType: SubjectType; originalRating: number | null; currentRating: number | null;
   lastPublishedRating: number | null; model: Model; modelVersion: 1;
-  calibration: 'fixed-ordinal-v1'; updatedAt: string;
+  calibration: 'fixed-ordinal-v1' | 'spread-ordinal-v2'; updatedAt: string;
 }
 export interface Data {
   version: 2; completedOnly: true; userId: number; revision: number; importedAt: string | null;
   anchors: Anchor[]; unrated: Subject[]; comparisons: Comparison[]; records: Record[];
-  config: { model: Model; shrinkage: number };
+  config: { model: Model; shrinkage: number; spread: number };
 }
 
 export const validId = (n: unknown): n is number => Number.isSafeInteger(n) && Number(n) > 0;
@@ -28,7 +28,7 @@ export const validRate = (n: unknown): n is number => Number.isInteger(n) && Num
 export const eligible = (anchors: Anchor[], type: SubjectType) => new Set(anchors.filter(a => a.type === type && validId(a.id) && validRate(a.rate)).map(a => a.id)).size >= 50;
 export const emptyData = (userId: number): Data => ({
   version: 2, completedOnly: true, userId, revision: 0, importedAt: null, anchors: [], unrated: [], comparisons: [], records: [],
-  config: { model: 'bt', shrinkage: 1 },
+  config: { model: 'bt', shrinkage: 1, spread: 2 },
 });
 
 export function safeCover(value: unknown): string {
@@ -56,7 +56,8 @@ export function parseBackup(value: unknown, userId: number): Data {
   if (!v.config || !['bt', 'elo'].includes(v.config.model) || ![0.5, 1, 2].includes(v.config.shrinkage)) return fail();
   const out = emptyData(userId);
   out.importedAt = v.importedAt;
-  out.config = { model: v.config.model, shrinkage: v.config.shrinkage };
+  if (v.config.spread !== undefined && ![1, 1.5, 2, 3].includes(v.config.spread)) return fail();
+  out.config = { model: v.config.model, shrinkage: v.config.shrinkage, spread: v.config.spread ?? 2 };
   out.revision = Number.isSafeInteger(v.revision) && Number(v.revision) >= 0 ? v.revision! : 0;
   const ids = new Set<number>();
   out.anchors = v.anchors.map(a => {
@@ -84,7 +85,7 @@ export function parseBackup(value: unknown, userId: number): Data {
   });
   ids.clear();
   out.records = v.records.map(r => {
-    if (!r || !validId(r.subjectId) || !validType(r.subjectType) || ids.has(r.subjectId) || !date(r.updatedAt) || !['bt', 'elo'].includes(r.model) || r.modelVersion !== 1 || r.calibration !== 'fixed-ordinal-v1') return fail();
+    if (!r || !validId(r.subjectId) || !validType(r.subjectType) || ids.has(r.subjectId) || !date(r.updatedAt) || !['bt', 'elo'].includes(r.model) || r.modelVersion !== 1 || !['fixed-ordinal-v1', 'spread-ordinal-v2'].includes(r.calibration)) return fail();
     checkType(r.subjectId, r.subjectType);
     if (![r.originalRating, r.currentRating, r.lastPublishedRating].every(n => n === null || validRate(n))) return fail();
     if (!Number.isFinite(r.score) || r.score < 1 || r.score > 10 || !Number.isFinite(r.strength) || Math.abs(r.strength) > 20 || !validRate(r.recommended) || !Number.isSafeInteger(r.useful) || r.useful < 0) return fail();
@@ -95,7 +96,7 @@ export function parseBackup(value: unknown, userId: number): Data {
       lastPublishedRating: r.lastPublishedRating, strength: r.strength, score: r.score,
       recommended: r.recommended, useful: r.useful, range: r.range ? [...r.range] as [number, number] : null,
       probabilities: [...r.probabilities], model: r.model, modelVersion: 1,
-      calibration: 'fixed-ordinal-v1', updatedAt: r.updatedAt };
+      calibration: r.calibration, updatedAt: r.updatedAt };
   });
   // Older imports included every status. Keep history but require a fresh
   // completed-only import before using those collections as scoring inputs.
