@@ -32,6 +32,33 @@ export function nextPoolPair(data: Data, type: SubjectType, goal = 3): [PoolSubj
   return null;
 }
 
+// Continuous refinement has no collection-wide quota. Prefer close scores,
+// discount well-observed pairs, and avoid the last 20 combinations on resume.
+export function nextContinuousPair(data: Data, type: SubjectType): [PoolSubject, Anchor] | null {
+  if (!eligible(data.anchors, type)) return null;
+  const pool = refinementSubjects(data, type);
+  const references = data.anchors.filter(a => a.type === type);
+  const evidence = new Map(pool.map(a => [a.id, estimate(data, a.id, type)]));
+  const density = new Map(pool.map(a => [a.id, pool.filter(b => Math.abs(evidence.get(a.id)!.score - evidence.get(b.id)!.score) <= 0.75).length]));
+  const key = (a: number, b: number) => `${Math.min(a, b)}:${Math.max(a, b)}`;
+  const history = data.comparisons.filter(c => c.subjectType === type);
+  const counts = new Map<string, number>();
+  for (const c of history) { const k = key(c.target, c.reference); counts.set(k, (counts.get(k) ?? 0) + 1); }
+  const recent = new Set(history.slice(-20).map(c => key(c.target, c.reference)));
+  let best: [PoolSubject, Anchor] | null = null;
+  let priority = -1;
+  for (const target of pool) for (const reference of references) {
+    if (target.id === reference.id || (target.rate !== null && target.id > reference.id)) continue;
+    const k = key(target.id, reference.id); if (recent.has(k)) continue;
+    const left = evidence.get(target.id)!; const right = evidence.get(reference.id)!;
+    const gap = Math.abs(left.score - right.score);
+    const cluster = 1 + Math.min(density.get(target.id)!, density.get(reference.id)!) / pool.length;
+    const weight = cluster * Math.exp(-0.5 * (gap / 0.75) ** 2) / (1 + (counts.get(k) ?? 0));
+    if (weight > priority) { priority = weight; best = [target, reference]; }
+  }
+  return best;
+}
+
 // An on-demand cell of the category's n×n probability matrix. Keep conflicting
 // and cyclic choices as observations, never turn them into ordering constraints.
 // Symmetric Dirichlet smoothing leaves unseen pairs uncertain. Skip is a fourth

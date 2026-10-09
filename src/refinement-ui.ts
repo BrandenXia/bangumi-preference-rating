@@ -2,7 +2,7 @@ import { categoryName, eligible } from './data.ts';
 import type { Data, Outcome, SubjectType } from './data.ts';
 import { getCollections, loggedInUsername } from './api.ts';
 import { estimate, newComparison, recompute, recordEstimate } from './model.ts';
-import { nextPoolPair, pairProbabilities, ratingChanges, refinementSubjects, rankedSubjects } from './refinement.ts';
+import { nextPoolPair, nextContinuousPair, pairProbabilities, ratingChanges, refinementSubjects, rankedSubjects } from './refinement.ts';
 import { publishRating } from './publish.ts';
 import { load, save } from './storage.ts';
 
@@ -28,6 +28,9 @@ export async function openRefinement(user: { id: number; username: string }, ini
   let type: SubjectType = 2;
   let view: 'category' | 'compare' | 'review' | 'ranking' = initialView;
   let goal = 3;
+  let mode: 'continuous' | 'coverage' = 'continuous';
+  const sessionChoices = new Set<string>();
+  const sessionLimit = 20;
   let busy = false;
   let publishing = false;
   let stop = false;
@@ -66,7 +69,8 @@ export async function openRefinement(user: { id: number; username: string }, ini
     const next = structuredClone(data); next.anchors = collections.anchors; next.unrated = collections.unrated; next.importedAt = new Date().toISOString();
     recompute(next); await persist(next); selected.clear(); notice = '';
   }
-  function begin(): void {
+  function begin(nextMode: 'continuous' | 'coverage' = 'continuous'): void {
+    mode = nextMode; sessionChoices.clear();
     const counts = refinementSubjects(data, type).map(a => estimate(data, a.id, type).useful);
     const minimum = Math.min(...counts);
     goal = minimum < 3 ? 3 : minimum + 3;
@@ -146,12 +150,12 @@ export async function openRefinement(user: { id: number; username: string }, ini
       table.append(body); const scroll = el('div', '', 'bpr-table-scroll bpr-ranking-table'); scroll.append(table); content.append(scroll);
     } else content.append(el('p', '先导入已完成的公开收藏，再开始比较。'));
     const actions = el('div', '', 'bpr-actions');
-    const compare = button('继续逐项比较', async () => { begin(); }, true); compare.disabled = !eligible(data.anchors, type);
+    const compare = button('连续细化（20 次一轮）', async () => { begin(); }, true); compare.disabled = !eligible(data.anchors, type);
     const review = button('检查评分变化', async () => { view = 'review'; }); review.disabled = !eligible(data.anchors, type);
     actions.append(compare, review, button('刷新当前评分', refresh), button('返回类别', async () => { view = 'category'; })); content.append(actions);
   }
   function renderCategory(): void {
-    content.append(el('p', '选择一个类别，依次比较已完成的收藏（已评分或未评分）。未评分条目与已评分条目比较，以估计首次评分，进度自动保存在本地。'));
+    content.append(el('p', '连续细化每轮最多 20 次选择，优先比较当前分数接近的已完成条目。随时关闭、查看排名或检查建议；下次从保存的历史继续，不要求比较完整个收藏。逐项覆盖比较适合首次全面整理。'));
     const label = el('label', '类别'); const select = el('select');
     for (const [id, name] of Object.entries(categoryName)) {
       const count = data.anchors.filter(a => a.type === Number(id)).length;
@@ -164,18 +168,24 @@ export async function openRefinement(user: { id: number; username: string }, ini
     const ready = pool.filter(a => estimate(data, a.id, type).useful >= 3).length;
     content.append(el('p', `${ready}/${pool.length} 个条目已有至少 3 次有效比较。各类别独立，需要至少 50 个已评分且已完成的公开收藏。`, 'bpr-muted'));
     const actions = el('div', '', 'bpr-actions');
-    const start = button('开始 / 继续逐项比较', async () => { begin(); }, true); start.disabled = !eligible(data.anchors, type);
+    const start = button('连续细化（20 次一轮）', async () => { begin(); }, true); start.disabled = !eligible(data.anchors, type);
     const review = button('查看评分变化', async () => { view = 'review'; }); review.disabled = !eligible(data.anchors, type);
-    actions.append(start, review, button('查看偏好排名', async () => { view = 'ranking'; }), button('导入 / 刷新公开评分', refresh)); content.append(actions);
+    const coverage = button('逐项覆盖比较', async () => { begin('coverage'); }); coverage.disabled = !eligible(data.anchors, type);
+    actions.append(start, coverage, review, button('查看偏好排名', async () => { view = 'ranking'; }), button('导入 / 刷新公开评分', refresh)); content.append(actions);
   }
   function renderCompare(): void {
     const pool = refinementSubjects(data, type);
     const done = pool.filter(a => estimate(data, a.id, type).useful >= goal).length;
-    content.append(el('p', `${categoryName[type]} · ${done}/${pool.length} 个条目达到本轮 ${goal} 次有效比较`, 'bpr-subtitle'));
-    const pair = nextPoolPair(data, type, goal);
+    const paused = mode === 'continuous' && sessionChoices.size >= sessionLimit;
+    content.append(el('p', mode === 'continuous'
+      ? `${categoryName[type]} · 连续细化 · 本轮 ${sessionChoices.size}/${sessionLimit} 次选择`
+      : `${categoryName[type]} · 逐项覆盖 · ${done}/${pool.length} 个条目达到本轮 ${goal} 次有效比较`, 'bpr-subtitle'));
+    const pair = paused ? null : mode === 'continuous' ? nextContinuousPair(data, type) : nextPoolPair(data, type, goal);
     if (!pair) {
-      content.append(el('p', done === pool.length ? '本轮逐项比较已完成。检查建议评分，再选择需要更新的条目。' : '可用的新组合已比较完。跳过的选择不计入有效次数，可检查已有建议。'));
-      content.append(button('检查评分变化', async () => { view = 'review'; }, true));
+      content.append(el('p', paused ? '本轮已完成，可以检查评分变化或再进行 20 次选择。每次选择已经保存，无需比较完整个收藏。' : done === pool.length ? '本轮逐项比较已完成。检查建议评分，再选择需要更新的条目。' : '可用的新组合已比较完。跳过的选择不计入有效次数，可检查已有建议。'));
+      const actions = el('div', '', 'bpr-actions');
+      if (mode === 'continuous') actions.append(button('再细化 20 次', async () => { begin(); }, true));
+      actions.append(button('检查评分变化', async () => { view = 'review'; }, true)); content.append(actions);
     } else {
       const cards = el('div', '', 'bpr-pair');
       for (const subject of pair) {
@@ -192,9 +202,9 @@ export async function openRefinement(user: { id: number; username: string }, ini
       const choices = el('div', '', 'bpr-choices');
       for (const [label, outcome] of [['更喜欢左边', 'target'], ['更喜欢右边', 'reference'], ['差不多', 'tie'], ['无法判断 / 跳过', 'skip']] as [string, Outcome][]) {
         choices.append(button(label, async () => {
-          const next = structuredClone(data); next.comparisons.push(newComparison(pair[0].id, pair[1].id, outcome, type));
+          const next = structuredClone(data); const comparison = newComparison(pair[0].id, pair[1].id, outcome, type); next.comparisons.push(comparison);
           for (const subject of pair) recordEstimate(next, subject.id, type);
-          await persist(next);
+          await persist(next); sessionChoices.add(comparison.id);
         }, outcome === 'target' || outcome === 'reference'));
       }
       content.append(choices);
@@ -203,10 +213,11 @@ export async function openRefinement(user: { id: number; username: string }, ini
     const undo = button('撤销上次比较', async () => {
       if (!last) return;
       const next = structuredClone(data); next.comparisons = next.comparisons.filter(c => c.id !== last.id);
-      recordEstimate(next, last.target, type); recordEstimate(next, last.reference, type); await persist(next);
+      recordEstimate(next, last.target, type); recordEstimate(next, last.reference, type); await persist(next); sessionChoices.delete(last.id);
     }); undo.disabled = !last;
     const actions = el('div', '', 'bpr-actions');
     actions.append(undo, button('查看偏好排名', async () => { view = 'ranking'; }), button('先检查已有变化', async () => { view = 'review'; }), button('返回类别', async () => { view = 'category'; }));
+    if (mode === 'continuous') content.append(el('p', '优先澄清分数接近的组合，避免立即重复，之后可重新比较矛盾或尚不明确的偏好。每轮仅是休息点，可以随时停止或继续。', 'bpr-muted'));
     content.append(actions, el('p', '选择可以矛盾或形成循环；保留全部历史，不要求严格排序。差不多计入比较，跳过不计入。检查并确认后才修改 Bangumi 评分。', 'bpr-muted'));
   }
   function renderReview(): void {
@@ -242,7 +253,7 @@ export async function openRefinement(user: { id: number; username: string }, ini
       table.append(body); const scroll = el('div', '', 'bpr-table-scroll'); scroll.append(table); content.append(scroll);
     } else content.append(el('p', '目前没有可更新的整数评分变化。继续比较可细化尚未达到 3 次有效比较的条目。'));
     const navigation = el('div', '', 'bpr-actions');
-    navigation.append(button('查看偏好排名', async () => { view = 'ranking'; }), button('继续比较', async () => { if (!nextPoolPair(data, type, goal)) begin(); else view = 'compare'; }),
+    navigation.append(button('查看偏好排名', async () => { view = 'ranking'; }), button('继续连续细化', async () => { if (sessionChoices.size >= sessionLimit || mode !== 'continuous') begin(); else view = 'compare'; }),
       button('刷新当前评分', refresh), button('返回类别', async () => { view = 'category'; })); content.append(navigation);
   }
   function render(): void {

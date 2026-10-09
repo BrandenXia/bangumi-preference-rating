@@ -203,3 +203,31 @@ test('category rankings sort refined scores, preserve ties and keep unsupported 
     assert.throws(() => parseBackup({ ...data, config: { ...data.config, spread: 99 } }, 1));
   }
 });
+
+test('continuous refinement prefers clustered scores, resumes and revisits without a whole-pool quota', async () => {
+  const { nextContinuousPair } = await import('../src/refinement.ts');
+  const data = emptyData(1); data.anchors = anchors(300);
+  const pair = nextContinuousPair(data, 2)!;
+  assert.ok(pair); assert.equal(pair[0].rate, pair[1].rate);
+  const clustered = emptyData(1); clustered.anchors = anchors(50).map(a => ({ ...a, rate: a.id <= 2 ? 1 : 7 }));
+  assert.equal(nextContinuousPair(clustered, 2)![0].rate, 7);
+  const before = structuredClone(data);
+  data.comparisons.push(newComparison(pair[0].id, pair[1].id, 'skip', 2));
+  const resumed = nextContinuousPair(parseBackup(JSON.parse(JSON.stringify(data)), 1), 2)!;
+  assert.notDeepEqual(resumed.map(a => a.id), pair.map(a => a.id));
+  assert.equal(nextContinuousPair(data, 4), null);
+  assert.equal(nextContinuousPair({ ...data, anchors: data.anchors.slice(0,49) }, 2), null);
+  const tied = emptyData(1); tied.anchors = anchors(300).map(a => ({ ...a, rate: 7 }));
+  for (let i = 0; i < 20; i++) {
+    const p = nextContinuousPair(tied, 2)!;
+    tied.comparisons.push(newComparison(p[0].id, p[1].id, 'tie', 2));
+    p.forEach(a => recordEstimate(tied, a.id, 2));
+  }
+  assert.ok(tied.records.some(r => r.useful >= 3));
+  assert.ok(tied.records.length < 300); // Useful suggestions can start before collection-wide coverage.
+  assert.ok(nextContinuousPair(tied, 2));
+  const completed = emptyData(1); completed.anchors = anchors(50);
+  for (let a = 1; a <= 50; a++) for (let b = a + 1; b <= 50; b++) completed.comparisons.push(newComparison(a,b,'tie',2));
+  assert.ok(nextContinuousPair(completed,2)); // Never requires increasing everyone's evidence quota.
+  assert.deepEqual(before.comparisons, []);
+});
