@@ -31,7 +31,7 @@ html[data-theme="dark"] #bpr-entry, html[data-theme="dark"] #bpr-home-entry, htm
 #bpr-dialog button:disabled { opacity: .5; cursor: default; }
 #bpr-dialog .bpr-actions { display: flex; flex-wrap: wrap; gap: 6px; margin: 18px 0; }
 #bpr-dialog label { display: block; margin: 18px 0; font-weight: 600; }
-#bpr-dialog select { display: block; width: 100%; margin-top: 6px; padding: 8px; border: 1px solid var(--bpr-button-border); border-radius: 5px; background: var(--bpr-bg); color: var(--bpr-text); font: inherit; }
+#bpr-dialog select, #bpr-dialog input[type="text"] { display: block; width: 100%; margin-top: 6px; padding: 8px; border: 1px solid var(--bpr-button-border); border-radius: 5px; background: var(--bpr-bg); color: var(--bpr-text); font: inherit; }
 #bpr-dialog textarea { display: block; width: 100%; padding: 10px; border: 1px solid var(--bpr-button-border); border-radius: 5px; resize: vertical; font: 12px/1.5 monospace; background: var(--bpr-bg); color: var(--bpr-text); }
 #bpr-dialog details { margin: 16px 0; font-size: 12px; }
 #bpr-dialog summary { cursor: pointer; }
@@ -60,3 +60,5 @@ html[data-theme="dark"] #bpr-entry, html[data-theme="dark"] #bpr-home-entry, htm
 #bpr-dialog .bpr-ranking-filters { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
 #bpr-dialog .bpr-ranking-filters label { margin: 0; }
 #bpr-dialog .bpr-ranking-filters details { margin: 6px 0 0; }
+
+#bpr-dialog input[type="checkbox"] { accent-color: var(--primary-color, #f09199); margin-right: 6px; }

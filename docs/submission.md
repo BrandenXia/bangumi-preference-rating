@@ -2,7 +2,7 @@
 
 Component: [个性化评分](https://bgm.tv/dev/app/7267)
 
-Development version: [0.3.6](https://bangumi.tv/dev/app/7267/gadget/3902).
+Development version: [0.3.7](https://bangumi.tv/dev/app/7267/gadget/3902).
 
 The updated version is enabled for the author and submitted for public review (审核中). The own-profile refinement entry appears below rating statistics, and supports category comparisons and confirmed selected batch updates. Subject preference scoring appears below the default rating chart in the collection panel; the floating window follows Bangumi typography and theme colors.
 
@@ -44,3 +44,6 @@ The saved 0.3.5 bundle matches the local build and is submitted for review (审�
 
 
 Version 0.3.6 adds “一键恢复原始评分” to the category, ranking and review panels. Confirmation previews changes across all categories, including resetting originally unscored entries; existing native form guards and partial-progress persistence apply. Fourteen core/publisher test groups and TypeScript/build checks pass. The saved native bundle matches the local build and is submitted for review (审核中). Mock recovery restored three entries across two categories, including a cleared score, preserving other form fields; a second run correctly found no changes. The native recovery button was verified without changing real ratings.
+
+
+Version 0.3.7 adds optional similar-genre matching, automatic cached genre metadata, adult separation and editable custom lanes. Unclassified subjects do not silently enter another lane; scores and old comparisons remain category-wide. Fifteen test groups and TypeScript/build checks pass. Mock checks verified same-genre choices, automatic metadata loading, and saved custom lanes across reload. Native controls and saved bundle were verified without changing real preferences or ratings. The saved bundle matches the local build and is submitted for review (审核中), replacing the pending 0.3.6 version. This update also includes original-rating recovery from 0.3.6.

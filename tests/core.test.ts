@@ -347,3 +347,36 @@ test('original-rating recovery spans categories, restores unscored entries and p
   assert.deepEqual(backup.comparisons, data.comparisons);
   assert.deepEqual(backup.manualOrders, data.manualOrders);
 });
+
+
+test('optional genre lanes filter both schedulers without changing scores or old evidence', async () => {
+  const { similarPair, genreTags, adultTag } = await import('../src/lanes.ts');
+  const { nextContinuousPair, nextPoolPair } = await import('../src/refinement.ts');
+  const data = emptyData(1); data.anchors = anchors(50).map(a => ({ ...a, rate: 7 }));
+  data.comparisons = [newComparison(1, 3, 'target', 2), newComparison(3, 1, 'target', 2)]; recompute(data);
+  const scores = data.records.map(r => r.score);
+  data.lanes = [
+    { subjectId: 1, tags: ['恋爱'], adult: false, manual: false },
+    { subjectId: 2, tags: ['恋爱', '战斗'], adult: false, manual: true },
+    { subjectId: 3, tags: ['战斗'], adult: false, manual: false },
+    { subjectId: 4, tags: ['恋爱'], adult: true, manual: true },
+    { subjectId: 5, tags: [], adult: true, manual: true },
+    { subjectId: 6, tags: ['恋爱'], adult: null, manual: false },
+  ];
+  assert.equal(similarPair(data, 1, 3), true); data.config.similarGenres = true;
+  assert.equal(similarPair(data, 1, 2), true); assert.equal(similarPair(data, 1, 3), false);
+  assert.equal(similarPair(data, 2, 3), true); assert.equal(similarPair(data, 1, 4), false);
+  assert.equal(similarPair(data, 4, 5), true); assert.equal(similarPair(data, 1, 6), false);
+  assert.equal(similarPair(data, 6, 6), false); assert.equal(similarPair(data, 1, 7), false);
+  for (const choose of [nextContinuousPair, nextPoolPair]) {
+    const pair = choose(data, 2)!; assert.ok(pair); assert.ok(similarPair(data, pair[0].id, pair[1].id));
+    const isolated = structuredClone(data); isolated.lanes = [data.lanes[0]];
+    assert.equal(choose(isolated, 2), null);
+  }
+  recompute(data); assert.deepEqual(data.records.map(r => r.score), scores); assert.equal(data.comparisons.length, 2);
+  const backup = parseBackup(JSON.parse(JSON.stringify(data)), 1); assert.deepEqual(backup.lanes, data.lanes); assert.equal(backup.config.similarGenres, true);
+  const old = JSON.parse(JSON.stringify(data)); delete old.lanes; delete old.config.similarGenres;
+  assert.equal(parseBackup(old, 1).config.similarGenres, false);
+  assert.throws(() => parseBackup({ ...data, lanes: [{ ...data.lanes[0], adult: 'no' }] }, 1));
+  assert.deepEqual(genreTags(['2020', 'TV', '恋愛', 'action', '动画']), ['恋爱', '战斗']); assert.ok(adultTag(['R18']));
+});

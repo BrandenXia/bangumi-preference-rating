@@ -1,3 +1,4 @@
+import { similarPair } from './lanes.ts';
 import { eligible } from './data.ts';
 import type { Anchor, Data, Subject, SubjectType, Estimate } from './data.ts';
 import { estimateCategory, newComparison, recompute } from './model.ts';
@@ -23,7 +24,7 @@ export function nextPoolPair(data: Data, type: SubjectType, goal = 3): [PoolSubj
   const targets = pool.filter(a => evidence.get(a.id)!.useful < goal).sort((a, b) =>
     attempts.get(a.id)! - attempts.get(b.id)! || evidence.get(a.id)!.useful - evidence.get(b.id)!.useful || a.id - b.id);
   for (const target of targets) {
-    const reference = data.anchors.filter(a => a.type === type).filter(a => a.id !== target.id && (seen.get(pairKey(target.id, a.id)) ?? 0) < Math.ceil(goal / 3)).sort((a, b) =>
+    const reference = data.anchors.filter(a => a.type === type).filter(a => a.id !== target.id && similarPair(data, target.id, a.id) && (seen.get(pairKey(target.id, a.id)) ?? 0) < Math.ceil(goal / 3)).sort((a, b) =>
       Number(evidence.get(a.id)!.useful >= goal) - Number(evidence.get(b.id)!.useful >= goal) ||
       Math.abs(evidence.get(a.id)!.strength - evidence.get(target.id)!.strength) - Math.abs(evidence.get(b.id)!.strength - evidence.get(target.id)!.strength) ||
       attempts.get(a.id)! - attempts.get(b.id)! || a.id - b.id)[0];
@@ -48,7 +49,7 @@ export function nextContinuousPair(data: Data, type: SubjectType): [PoolSubject,
   let best: [PoolSubject, Anchor] | null = null;
   let priority = -1;
   for (const target of pool) for (const reference of references) {
-    if (target.id === reference.id || (target.rate !== null && target.id > reference.id)) continue;
+    if (!similarPair(data, target.id, reference.id) || target.id === reference.id || (target.rate !== null && target.id > reference.id)) continue;
     const k = key(target.id, reference.id); if (recent.has(k)) continue;
     const left = evidence.get(target.id)!; const right = evidence.get(reference.id)!;
     const gap = Math.abs(left.score - right.score);

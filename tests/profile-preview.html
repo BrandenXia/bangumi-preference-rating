@@ -29,6 +29,7 @@ main { max-width:980px; margin:30px auto; display:grid; grid-template-columns:1f
   window.fetch = async (input, init = {}) => {
     const url = new URL(input, location.href); const path = url.pathname;
     const scenario = document.querySelector('#scenario').value;
+    if (path.startsWith('/v0/subjects/')) { const id=Number(path.split('/').at(-1)); return new Response(JSON.stringify({nsfw:id%10===0,tags:[{name:id%2?'恋爱':'战斗'},{name:'2020'}]})); }
     if (path === '/v0/users/preview') return new Response(JSON.stringify({ id:fixtureId }));
     if (path === '/v0/users/other') return new Response(JSON.stringify({ id:888888 }));
     if (path === '/v0/users/preview/collections') {

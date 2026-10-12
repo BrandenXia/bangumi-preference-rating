@@ -67,3 +67,11 @@ export async function getCollections(username: string, progress: (n: number) => 
   }
   throw new Error('收藏数量超出导入上限。');
 }
+
+
+export async function getSubjectTags(id: number): Promise<{ tags: string[]; adult: boolean | null }> {
+  const subject = await get(`/subjects/${id}`);
+  return { tags: [...(Array.isArray(subject.tags) ? subject.tags.map((t: any) => t?.name) : []), ...(Array.isArray(subject.meta_tags) ? subject.meta_tags : [])]
+      .filter((t: unknown): t is string => typeof t === 'string').slice(0, 100),
+    adult: typeof subject.nsfw === 'boolean' ? subject.nsfw : null };
+}

@@ -21,7 +21,8 @@ export interface Data {
   version: 2; completedOnly: true; userId: number; revision: number; importedAt: string | null;
   anchors: Anchor[]; unrated: Subject[]; comparisons: Comparison[]; records: Record[];
   manualOrders: { subjectType: SubjectType; subjects: number[] }[];
-  config: { model: Model; shrinkage: number; spread: number };
+  lanes: { subjectId: number; tags: string[]; adult: boolean | null; manual: boolean }[];
+  config: { model: Model; shrinkage: number; spread: number; similarGenres: boolean };
 }
 
 export const validId = (n: unknown): n is number => Number.isSafeInteger(n) && Number(n) > 0;
@@ -29,7 +30,7 @@ export const validRate = (n: unknown): n is number => Number.isInteger(n) && Num
 export const eligible = (anchors: Anchor[], type: SubjectType) => new Set(anchors.filter(a => a.type === type && validId(a.id) && validRate(a.rate)).map(a => a.id)).size >= 50;
 export const emptyData = (userId: number): Data => ({
   version: 2, completedOnly: true, userId, revision: 0, importedAt: null, anchors: [], unrated: [], comparisons: [], records: [],
-  manualOrders: [], config: { model: 'bt', shrinkage: 1, spread: 2 },
+  manualOrders: [], lanes: [], config: { model: 'bt', shrinkage: 1, spread: 2, similarGenres: false },
 });
 
 export function safeCover(value: unknown): string {
@@ -58,7 +59,17 @@ export function parseBackup(value: unknown, userId: number): Data {
   const out = emptyData(userId);
   out.importedAt = v.importedAt;
   if (v.config.spread !== undefined && ![1, 1.5, 2, 3].includes(v.config.spread)) return fail();
-  out.config = { model: v.config.model, shrinkage: v.config.shrinkage, spread: v.config.spread ?? 2 };
+  if (v.config.similarGenres !== undefined && typeof v.config.similarGenres !== 'boolean') return fail();
+  out.config = { model: v.config.model, shrinkage: v.config.shrinkage, spread: v.config.spread ?? 2, similarGenres: v.config.similarGenres ?? false };
+  if (v.lanes !== undefined && (!Array.isArray(v.lanes) || v.lanes.length > 100000)) return fail();
+  const laneIds = new Set<number>();
+  out.lanes = (v.lanes ?? []).map(lane => {
+    if (!lane || !validId(lane.subjectId) || laneIds.has(lane.subjectId) || typeof lane.manual !== 'boolean' ||
+      !(lane.adult === null || typeof lane.adult === 'boolean') || !Array.isArray(lane.tags) || lane.tags.length > 20 ||
+      !lane.tags.every(t => typeof t === 'string' && t.length > 0 && t.length <= 50)) return fail();
+    laneIds.add(lane.subjectId);
+    return { subjectId: lane.subjectId, tags: [...new Set(lane.tags)], adult: lane.adult, manual: lane.manual };
+  });
   out.revision = Number.isSafeInteger(v.revision) && Number(v.revision) >= 0 ? v.revision! : 0;
   const ids = new Set<number>();
   out.anchors = v.anchors.map(a => {

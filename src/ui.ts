@@ -1,3 +1,4 @@
+import { similarPair } from './lanes.ts';
 import { categoryName, eligible, parseBackup } from './data.ts';
 import type { Subject, Data, Model, Outcome } from './data.ts';
 import { getCollections, loggedInUsername } from './api.ts';
@@ -178,7 +179,9 @@ export async function openPanel(user: { id: number; username: string }, subject:
     if (result.useful >= 3 && result.range) content.append(el('p', `模型敏感性范围 ${result.range[0].toFixed(2)}–${result.range[1].toFixed(2)}，不是校准后的置信区间。`, 'bpr-muted'));
     else if (result.useful >= 3) content.append(el('p', 'Elo 不提供不确定性区间；分数仍为初步建议。', 'bpr-muted'));
     if (new Set(pool.map(a => a.rate)).size < 3) content.append(el('p', '原评分较集中，绝对分数参考价值有限。', 'bpr-muted'));
-    const candidate = currentReference ? pool.find(a => a.id === currentReference) : chooseReference(pool, subject.id, result.strength, seen);
+    if (data.config.similarGenres) content.append(el('p', '已启用相近题材匹配；可在本人主页调整题材，缺少匹配时不会混入其他赛道。', 'bpr-muted'));
+    const matches = pool.filter(a => similarPair(data, subject.id, a.id));
+    const candidate = currentReference ? matches.find(a => a.id === currentReference) : chooseReference(matches, subject.id, result.strength, seen);
     if (result.useful < budget && candidate) {
       currentReference = candidate.id;
       content.append(el('h3', '你更喜欢哪一部？'));

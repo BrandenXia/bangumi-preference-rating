@@ -1,6 +1,7 @@
+import { genreTags, adultTag, laneLabel } from './lanes.ts';
 import { categoryName, eligible } from './data.ts';
 import type { Data, Outcome, SubjectType } from './data.ts';
-import { getCollections, loggedInUsername } from './api.ts';
+import { getCollections, getSubjectTags, loggedInUsername } from './api.ts';
 import { estimateCategory, newComparison, recompute } from './model.ts';
 import { nextPoolPair, nextContinuousPair, pairProbabilities, originalRatingChanges, ratingChanges, refinementSubjects, rankedSubjects, setManualOrder } from './refinement.ts';
 import { publishRating } from './publish.ts';
@@ -133,6 +134,59 @@ export async function openRefinement(user: { id: number; username: string }, ini
     } finally { publishing = false; close.textContent = '关闭'; }
   }
 
+  async function readLanes(): Promise<void> {
+    const pool = refinementSubjects(data, type).filter(subject => !data.lanes.some(l => l.subjectId === subject.id));
+    let loaded = 0, unavailable = 0;
+    // Persist each successful lookup, so a closed window or rate limit can resume.
+    close.disabled = false;
+    for (const subject of pool) {
+      alive(); status.textContent = `读取题材 ${++loaded}/${pool.length} · ${subject.title}`;
+      let metadata;
+      try { metadata = await getSubjectTags(subject.id); }
+      catch (error) {
+        if (error instanceof Error && error.message.includes('404')) { unavailable++; continue; }
+        throw error;
+      }
+      const next = structuredClone(data);
+      next.lanes.push({ subjectId: subject.id, tags: genreTags(metadata.tags), adult: adultTag(metadata.tags) ? true : metadata.adult, manual: false });
+      await persist(next);
+      if (loaded < pool.length) await new Promise(resolve => setTimeout(resolve, 250));
+    }
+    notice = `题材读取完成${unavailable ? `；${unavailable} 个条目无法通过公开 API 读取，请手动设置。` : '。'}`;
+  }
+  function laneControls(): void {
+    const label = el('label', '只比较相近题材'); const check = el('input'); check.type = 'checkbox'; check.checked = data.config.similarGenres;
+    check.onchange = () => void action(async () => { const next = structuredClone(data); next.config.similarGenres = check.checked; await persist(next); notice = ''; if (check.checked) await readLanes(); });
+    label.prepend(check); content.append(label);
+    const details = el('details'); details.append(el('summary', '题材匹配与手动调整'));
+    details.append(el('p', '按共享题材标签匹配；成人条目单独匹配。未知成人属性或没有合适题材的条目暂不出题，可手动补充。仅筛选比较对象，不改变类别评分、排名或旧比较。', 'bpr-muted'));
+    details.append(button('读取当前类别题材标签', readLanes));
+    const pool = refinementSubjects(data, type);
+    if (pool.length) {
+      const subjectLabel = el('label', '调整条目'); const subject = el('select');
+      for (const item of pool) { const option = el('option', item.title); option.value = String(item.id); subject.append(option); } subjectLabel.append(subject);
+      const tagsLabel = el('label', '题材（逗号分隔，可自定义）'); const tags = el('input'); tags.type = 'text'; tags.maxLength = 1000; tagsLabel.append(tags);
+      const adultLabel = el('label', '成人属性'); const adult = el('select');
+      for (const [value, name] of [['unknown', '未知（不参与匹配）'], ['no', '非成人'], ['yes', '成人']]) { const option = el('option', name); option.value = value; adult.append(option); } adultLabel.append(adult);
+      const source = el('p', '', 'bpr-muted');
+      const show = () => { const lane = data.lanes.find(l => l.subjectId === Number(subject.value)); tags.value = lane?.tags.join(', ') ?? ''; adult.value = lane?.adult === true ? 'yes' : lane?.adult === false ? 'no' : 'unknown'; source.textContent = lane?.manual ? '使用手动题材' : '使用自动题材（或尚未读取）'; };
+      subject.onchange = show; show();
+      details.append(subjectLabel, tagsLabel, adultLabel, source, button('保存条目题材', async () => {
+        const values = [...new Set(tags.value.split(/[,，]/).map(t => t.trim().toLowerCase()).filter(Boolean))];
+        if (values.length > 20 || values.some(t => t.length > 50)) throw new Error('最多20个题材，每个不超过50字。');
+        const next = structuredClone(data); next.lanes = next.lanes.filter(l => l.subjectId !== Number(subject.value));
+        next.lanes.push({ subjectId: Number(subject.value), tags: values, adult: adult.value === 'unknown' ? null : adult.value === 'yes', manual: true });
+        await persist(next); notice = '条目题材已保存。';
+      }), button('恢复此条目自动题材', async () => {
+        const metadata = await getSubjectTags(Number(subject.value)); const next = structuredClone(data);
+        next.lanes = next.lanes.filter(l => l.subjectId !== Number(subject.value));
+        next.lanes.push({ subjectId: Number(subject.value), tags: genreTags(metadata.tags), adult: adultTag(metadata.tags) ? true : metadata.adult, manual: false });
+        await persist(next); notice = '已恢复自动题材。';
+      }));
+    }
+    content.append(details);
+  }
+
   function spreadControl(container: HTMLElement = content, compact = false): void {
     const label = el('label', '评分展开程度'); const select = el('select');
     for (const [value, name] of [[1, '小幅细化'], [1.5, '适度细化'], [2, '默认细化'], [3, '更大调整']] as const) {
@@ -154,7 +208,7 @@ export async function openRefinement(user: { id: number; username: string }, ini
     for (const [id, name] of Object.entries(categoryName)) { const option = el('option', name); option.value = id; select.append(option); }
     select.value = String(type); select.onchange = () => { type = Number(select.value) as SubjectType; selected.clear(); draftOrder = null; render(); };
     label.append(select); const filters = el('div', '', 'bpr-ranking-filters'); const spread = el('div');
-    filters.append(label, spread); content.append(filters); spreadControl(spread, true);
+    filters.append(label, spread); content.append(filters); laneControls(); spreadControl(spread, true);
     const display = draftOrder?.subjectType === type
       ? { ...data, manualOrders: [...data.manualOrders.filter(order => order.subjectType !== type), draftOrder] } : data;
     const rows = rankedSubjects(display, type, draftOrder !== null || rankingView === 'manual');
@@ -275,7 +329,7 @@ export async function openRefinement(user: { id: number; username: string }, ini
       const option = el('option', `${name} · ${count} 个已评分 / ${unscored} 个未评分`); option.value = id; select.append(option);
     }
     select.value = String(type); select.onchange = () => { type = Number(select.value) as SubjectType; selected.clear(); draftOrder = null; render(); };
-    label.append(select); content.append(label); spreadControl();
+    label.append(select); content.append(label); laneControls(); spreadControl();
     const pool = refinementSubjects(data, type);
     const ready = [...estimateCategory(data, type).values()].filter(a => a.useful >= 3).length;
     content.append(el('p', `${ready}/${pool.length} 个条目已有至少 3 次有效比较。各类别独立，需要至少 50 个已评分且已完成的公开收藏。`, 'bpr-muted'));
@@ -295,7 +349,7 @@ export async function openRefinement(user: { id: number; username: string }, ini
       : `${categoryName[type]} · 逐项覆盖 · ${done}/${pool.length} 个条目达到本轮 ${goal} 次有效比较`, 'bpr-subtitle'));
     const pair = paused ? null : mode === 'continuous' ? nextContinuousPair(data, type) : nextPoolPair(data, type, goal);
     if (!pair) {
-      content.append(el('p', paused ? '本轮已完成，可以检查评分变化或再进行 20 次选择。每次选择已经保存，无需比较完整个收藏。' : done === pool.length ? '本轮逐项比较已完成。检查建议评分，再选择需要更新的条目。' : '可用的新组合已比较完。跳过的选择不计入有效次数，可检查已有建议。'));
+      content.append(el('p', paused ? '本轮已完成，可以检查评分变化或再进行 20 次选择。每次选择已经保存，无需比较完整个收藏。' : done === pool.length ? '本轮逐项比较已完成。检查建议评分，再选择需要更新的条目。' : data.config.similarGenres ? '没有合适的同题材组合；请返回类别读取标签或调整条目题材，未分类条目不会混入其他赛道。' : '可用的新组合已比较完。跳过的选择不计入有效次数，可检查已有建议。'));
       const actions = el('div', '', 'bpr-actions');
       if (mode === 'continuous') actions.append(button('再细化 20 次', async () => { begin(); }, true));
       actions.append(button('检查评分变化', async () => { view = 'review'; }, true)); content.append(actions);
@@ -307,7 +361,7 @@ export async function openRefinement(user: { id: number; username: string }, ini
           const image = el('img'); image.src = subject.cover; image.alt = ''; image.referrerPolicy = 'no-referrer';
           image.onerror = () => image.remove(); card.append(image);
         }
-        card.append(el('h4', subject.title), el('p', subject.rate === null ? '当前未评分' : `当前 ${subject.rate} 分`, 'bpr-muted')); cards.append(card);
+        card.append(el('h4', subject.title), el('p', subject.rate === null ? '当前未评分' : `当前 ${subject.rate} 分`, 'bpr-muted')); if (data.config.similarGenres) card.append(el('p', laneLabel(data, subject.id), 'bpr-muted')); cards.append(card);
       }
       content.append(el('h3', '你更喜欢哪一部？'), cards);
       const probabilities = pairProbabilities(data, type, pair[0].id, pair[1].id);
