@@ -32,19 +32,19 @@ async function collectionForm(id: number): Promise<{ action: string; fields: For
 
 // Use the existing signed-in form and its CSRF token. Preserve every successful
 // field, including status, privacy, tags, comment, and any progress controls.
-export async function publishRating(username: string, id: number, expected: number | null, rating: number): Promise<void> {
-  if (!validId(id) || (expected !== null && !validRate(expected)) || !validRate(rating)) throw new Error('评分参数无效。');
+export async function publishRating(username: string, id: number, expected: number | null, rating: number | null): Promise<void> {
+  if (!validId(id) || (expected !== null && !validRate(expected)) || (rating !== null && !validRate(rating))) throw new Error('评分参数无效。');
   await assertSession(username);
   const before = await collectionForm(id);
   if (before.fields.get('interest') !== '2') throw new Error('条目已不再是完成状态，已停止更新；请刷新收藏。');
   const current = Number(before.fields.get('rating'));
-  if (current === rating) return; // A previous timed-out attempt may have succeeded.
+  if (current === (rating ?? 0)) return; // A previous timed-out attempt may have succeeded.
   if (current !== (expected ?? 0)) throw new Error(`当前评分已从 ${expected ?? '未评分'} 变为 ${current || '未评分'}，请刷新公开评分后重新检查。`);
   const fields = before.fields;
-  fields.set('rating', String(rating)); fields.set('referer', 'ajax'); fields.set('update', '保存');
+  fields.set('rating', String(rating ?? 0)); fields.set('referer', 'ajax'); fields.set('update', '保存');
   const response = await fetch(before.action, { method: 'POST', credentials: 'same-origin', body: fields,
     signal: AbortSignal.timeout(20000) });
   if (!response.ok) throw new Error(errorText(response.status));
   const after = await collectionForm(id);
-  if (Number(after.fields.get('rating')) !== rating) throw new Error('评分更新未得到确认，已停止；请刷新后检查。');
+  if (Number(after.fields.get('rating')) !== (rating ?? 0)) throw new Error('评分更新未得到确认，已停止；请刷新后检查。');
 }

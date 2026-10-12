@@ -147,7 +147,7 @@ export function recordEstimate(data: Data, subjectId: number, type: SubjectType,
 }
 
 export function recompute(data: Data): void {
-  const targets = new Map([...data.anchors.map(a => [a.id, a.type] as const), ...data.records.map(r => [r.subjectId, r.subjectType] as const),
+  const targets = new Map([...data.anchors.map(a => [a.id, a.type] as const), ...data.unrated.map(a => [a.id, a.type] as const), ...data.records.map(r => [r.subjectId, r.subjectType] as const),
     ...data.comparisons.flatMap(c => [[c.target, c.subjectType] as const, [c.reference, c.subjectType] as const]),
     ...data.manualOrders.flatMap(order => order.subjects.map(id => [id, order.subjectType] as const))]);
   for (const type of new Set(targets.values())) {

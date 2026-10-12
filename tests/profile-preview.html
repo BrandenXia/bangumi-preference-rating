@@ -14,6 +14,7 @@ main { max-width:980px; margin:30px auto; display:grid; grid-template-columns:1f
 <main><section><h1>Preview 的时光机</h1><p>只使用模拟收藏与模拟更新，不连接 Bangumi。</p>
 <label>模拟更新情形<select id="scenario"><option value="ok">成功</option><option value="fail-second">第二条更新失败</option><option value="conflict">远端评分已改变</option><option value="account">登录用户已改变</option><option value="incomplete">完成状态已改变</option><option value="unconfirmed">服务器未保存评分</option></select></label>
 <a href="/tests/profile-preview.html?other=1">模拟其他用户主页</a> · <a href="/tests/profile-preview.html">模拟自己主页</a>
+<button id="simulate-ratings">模拟已改评分（1→8，51→未评分，101→7）</button>
 <pre id="test-result">尚未写入</pre></section><aside id="columnB"><div class="menu_inner userStats"><h2>评分统计</h2><div id="userStatsContainers">动画 50 · 游戏 50 · 书籍 0</div></div></aside></main>
 <script>
   const fixtureId = Number(new URLSearchParams(location.search).get('fresh')) || 999999;
@@ -23,6 +24,7 @@ main { max-width:980px; margin:30px auto; display:grid; grid-template-columns:1f
   subjects.push(...[101,102].map(id=>({subject_id:id,subject_type:2,type:2,rate:0,subject:{name_cn:'未评分作品 '+id,images:{}}})));
   subjects.push(...[1,3,4,5].map(type=>({subject_id:110+type,subject_type:2,type,rate:0,subject:{name_cn:'未完成作品 '+type,images:{}}})));
   const rates = new Map(subjects.map(s=>[s.subject_id,s.rate])); let writes=0;
+  document.querySelector('#simulate-ratings').onclick = () => { rates.set(1,8); rates.set(51,0); rates.set(101,7); };
   window.chiiLib = { ukagaka:{ addGeneralConfig(){} } };
   window.fetch = async (input, init = {}) => {
     const url = new URL(input, location.href); const path = url.pathname;

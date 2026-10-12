@@ -2,7 +2,7 @@
 
 Component: [个性化评分](https://bgm.tv/dev/app/7267)
 
-Development version: [0.3.5](https://bangumi.tv/dev/app/7267/gadget/3887).
+Development version: [0.3.6](https://bangumi.tv/dev/app/7267/gadget/3902).
 
 The updated version is enabled for the author and submitted for public review (审核中). The own-profile refinement entry appears below rating statistics, and supports category comparisons and confirmed selected batch updates. Subject preference scoring appears below the default rating chart in the collection panel; the floating window follows Bangumi typography and theme colors.
 
@@ -41,3 +41,6 @@ The saved 0.3.4 bundle matches the local build and is submitted for review (审�
 Version 0.3.5 preserves imported ratings exactly as starting scores, then gradually applies evidence-weighted adjustments. Spread affects adjustments only; existing low ratings and user-chosen 10s remain intact. Rated entries appear immediately, while unscored estimates and batch suggestions still require three useful comparisons. Saved manual display order remains independent of model scores.
 
 The saved 0.3.5 bundle matches the local build and is submitted for review (审核中). Native verification found all 344 rated anime unchanged at initialization and zero batch-update suggestions. Mock checks confirmed gradual refinement; all 12 core test groups, TypeScript and build checks pass. No real preferences or ratings were changed during this release check.
+
+
+Version 0.3.6 adds “一键恢复原始评分” to the category, ranking and review panels. Confirmation previews changes across all categories, including resetting originally unscored entries; existing native form guards and partial-progress persistence apply. Fourteen core/publisher test groups and TypeScript/build checks pass. The saved native bundle matches the local build and is submitted for review (审核中). Mock recovery restored three entries across two categories, including a cleared score, preserving other form fields; a second run correctly found no changes. The native recovery button was verified without changing real ratings.

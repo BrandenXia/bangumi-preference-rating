@@ -324,3 +324,26 @@ test('imported ratings initialize exact scores and gradually refine only subject
     assert.equal(rankedSubjects(small, 2).filter(r => r.result).length, 10);
   }
 });
+
+
+test('original-rating recovery spans categories, restores unscored entries and preserves first snapshots', async () => {
+  const { originalRatingChanges } = await import('../src/refinement.ts');
+  const data = emptyData(1);
+  data.anchors = [anchors(1)[0], { ...anchors(1)[0], id: 200, type: 4, rate: 10 }];
+  data.unrated = [{ id: 101, type: 2, title: 'Unscored', cover: '' }];
+  recordEstimate(data, 101, 2); recompute(data);
+  data.anchors[0].rate = 8;
+  data.anchors[1].rate = 6;
+  data.anchors.push({ ...data.unrated[0], rate: 7 }); data.unrated = [];
+  // Refresh/recompute must not replace the first saved values.
+  recompute(data);
+  const backup = parseBackup(JSON.parse(JSON.stringify(data)), 1);
+  assert.deepEqual(originalRatingChanges(backup).map(c => [c.subject.id, c.from, c.to]), [[1, 8, 1], [200, 6, 10], [101, 7, null]]);
+  backup.anchors[0].rate = 1; // A partially completed recovery is resumable.
+  assert.equal(originalRatingChanges(backup).length, 2);
+  backup.anchors = backup.anchors.filter(a => a.id !== 200); // No longer completed/imported.
+  backup.anchors.push({ ...anchors(1)[0], id: 300 }); // No saved original.
+  assert.deepEqual(originalRatingChanges(backup).map(c => c.subject.id), [101]);
+  assert.deepEqual(backup.comparisons, data.comparisons);
+  assert.deepEqual(backup.manualOrders, data.manualOrders);
+});

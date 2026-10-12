@@ -2,7 +2,7 @@ import { categoryName, eligible } from './data.ts';
 import type { Data, Outcome, SubjectType } from './data.ts';
 import { getCollections, loggedInUsername } from './api.ts';
 import { estimateCategory, newComparison, recompute } from './model.ts';
-import { nextPoolPair, nextContinuousPair, pairProbabilities, ratingChanges, refinementSubjects, rankedSubjects, setManualOrder } from './refinement.ts';
+import { nextPoolPair, nextContinuousPair, pairProbabilities, originalRatingChanges, ratingChanges, refinementSubjects, rankedSubjects, setManualOrder } from './refinement.ts';
 import { publishRating } from './publish.ts';
 import { load, save } from './storage.ts';
 
@@ -55,11 +55,20 @@ export async function openRefinement(user: { id: number; username: string }, ini
   function button(label: string, task: () => Promise<void>, primary = false): HTMLButtonElement {
     const b = el('button', label, primary ? 'bpr-primary' : ''); b.type = 'button'; b.onclick = () => void action(task); return b;
   }
-  function confirmBatch(count: number): Promise<boolean> {
+  function confirmBatch(count: number, restoring = false): Promise<boolean> {
     return new Promise(resolve => {
-      content.replaceChildren(el('h3', `更新 ${count} 个 Bangumi 评分？`),
-        el('p', '将写入已选条目的建议整数评分，保留收藏状态、标签、吐槽、隐私和进度。已完成的更新会逐条保存；遇到失败会停止。'));
-      const cancel = el('button', '返回检查'); const confirm = el('button', '确认批量更新', 'bpr-primary');
+      content.replaceChildren(el('h3', restoring ? `恢复 ${count} 个原始 Bangumi 评分？` : `更新 ${count} 个 Bangumi 评分？`),
+        el('p', restoring ? '恢复所有类别中本插件首次保存的原始评分，包括原本未评分的条目。不清除比较历史和手动顺序，不改动其他收藏信息；遇到失败会停止。此操作不能恢复本地备份中不存在的评分。' : '将写入已选条目的建议整数评分，保留收藏状态、标签、吐槽、隐私和进度。已完成的更新会逐条保存；遇到失败会停止。'));
+      if (restoring) {
+        const table = el('table', '', 'bpr-review');
+        const head = el('tr'); ['条目', '当前', '原始'].forEach(title => head.append(el('th', title))); table.append(head);
+        for (const change of originalRatingChanges(data)) {
+          const row = el('tr'); row.append(el('td', `${categoryName[change.subject.type]} · ${change.subject.title}`),
+            el('td', String(change.from ?? '未评分')), el('td', String(change.to ?? '未评分'))); table.append(row);
+        }
+        const scroll = el('div', '', 'bpr-table-scroll'); scroll.append(table); content.append(scroll);
+      }
+      const cancel = el('button', '返回检查'); const confirm = el('button', restoring ? '确认恢复原始评分' : '确认批量更新', 'bpr-primary');
       const finish = (answer: boolean) => { dialog.removeEventListener('close', closed); resolve(answer); };
       const closed = () => resolve(false); dialog.addEventListener('close', closed, { once: true });
       cancel.onclick = () => finish(false); confirm.onclick = () => finish(true);
@@ -79,9 +88,12 @@ export async function openRefinement(user: { id: number; username: string }, ini
     goal = minimum < 3 ? 3 : minimum + 3;
     view = 'compare'; notice = '';
   }
-  async function publishSelected(): Promise<void> {
-    const changes = ratingChanges(data, type).filter(change => selected.has(change.subject.id));
-    if (!changes.length || !await confirmBatch(changes.length)) return;
+  async function publishSelected(restoring = false): Promise<void> {
+    // Refresh current values before recovery, retaining immutable originalRating.
+    if (restoring) await refresh();
+    const changes = restoring ? originalRatingChanges(data) : ratingChanges(data, type).filter(change => selected.has(change.subject.id));
+    if (!changes.length) { notice = restoring ? '所有已保存的原始评分均与当前评分一致，无需恢复。' : ''; return; }
+    if (!await confirmBatch(changes.length, restoring)) return;
     alive(); publishing = true; stop = false; close.disabled = false; close.textContent = '停止更新';
     content.replaceChildren(el('p', `正在逐条更新 ${changes.length} 个评分…`));
     const stopButton = el('button', '停止更新'); stopButton.onclick = () => { stop = true; stopButton.disabled = true; };
@@ -93,23 +105,29 @@ export async function openRefinement(user: { id: number; username: string }, ini
         alive();
         const latest = await load(user.id);
         if (latest.revision !== data.revision) throw new Error('另一个标签页已更新本地数据，请重新加载后检查。');
-        status.textContent = `${completed + 1}/${changes.length} · ${change.subject.title} · ${change.from ?? '未评分'} → ${change.to}`;
+        status.textContent = `${completed + 1}/${changes.length} · ${change.subject.title} · ${change.from ?? '未评分'} → ${change.to ?? '未评分'}`;
         await publishRating(user.username, change.subject.id, change.from, change.to);
         completed++;
         // Once the server confirms success, save it even if the dialog was closed.
         const next = structuredClone(data);
         const anchor = next.anchors.find(a => a.id === change.subject.id);
-        if (anchor) anchor.rate = change.to;
+        if (change.to === null) {
+          next.anchors = next.anchors.filter(a => a.id !== change.subject.id);
+          if (!next.unrated.some(a => a.id === change.subject.id)) {
+            const { rate, ...subject } = change.subject; next.unrated.push(subject);
+          }
+        } else if (anchor) anchor.rate = change.to;
         else {
           next.anchors.push({ ...change.subject, rate: change.to });
           next.unrated = next.unrated.filter(a => a.id !== change.subject.id);
         }
         const record = next.records.find(r => r.subjectId === change.subject.id)!;
         record.currentRating = change.to; record.lastPublishedRating = change.to;
+        if (restoring) recompute(next);
         await save(next); data = next; selected.delete(change.subject.id);
         if (completed < changes.length && !stop) await new Promise(resolve => setTimeout(resolve, 1000));
       }
-      notice = `已更新 ${completed}/${changes.length} 个评分${stop ? '，其余条目尚未更新。' : '。'}`;
+      notice = `已${restoring ? '恢复' : '更新'} ${completed}/${changes.length} 个评分${stop ? '，其余条目尚未更新。' : '。'}`;
     } catch (error) {
       notice = `已确认 ${completed}/${changes.length} 个评分；已停止。${error instanceof Error ? error.message : '更新失败。'} 可刷新评分后重新检查未完成条目。`;
     } finally { publishing = false; close.textContent = '关闭'; }
@@ -329,7 +347,7 @@ export async function openRefinement(user: { id: number; username: string }, ini
     content.append(el('p', '仅列出至少有 3 次有效比较、且未评分或建议整数与当前公开评分不同的条目。两位小数是本地建议。'));
     if (notice) content.append(el('p', notice, 'bpr-result'));
     const actions = el('div', '', 'bpr-actions');
-    const publish = button(`更新已选 ${selected.size} 个评分`, publishSelected, true); publish.disabled = selected.size === 0;
+    const publish = button(`更新已选 ${selected.size} 个评分`, async () => publishSelected(), true); publish.disabled = selected.size === 0;
     function selectionChanged(): void { publish.textContent = `更新已选 ${selected.size} 个评分`; publish.disabled = selected.size === 0; }
     actions.append(button('全选', async () => { changes.forEach(c => selected.add(c.subject.id)); }),
       button('取消全选', async () => { selected.clear(); }), publish); content.append(actions);
@@ -357,6 +375,12 @@ export async function openRefinement(user: { id: number; username: string }, ini
     content.replaceChildren();
     heading.textContent = '逐项细化评分';
     if (view === 'ranking') renderRanking(); else if (view === 'category') renderCategory(); else if (view === 'compare') renderCompare(); else renderReview();
+    if (view !== 'compare' && draftOrder === null) {
+      const recovery = el('div', '', 'bpr-actions');
+      recovery.append(button('一键恢复原始评分', async () => publishSelected(true))); content.append(recovery);
+      content.append(el('p', '恢复所有类别中本插件首次保存的评分（含原本未评分），需要确认；不清除比较历史或手动顺序。', 'bpr-muted'));
+    }
+    if (notice) status.textContent = notice;
     dialog.scrollTop = 0;
   }
   try { data = await load(user.id); recompute(data); alive(); render(); }

@@ -88,6 +88,16 @@ export function ratingChanges(data: Data, type: SubjectType): RatingChange[] {
   });
 }
 
+// Restore the first saved rating, including originally unscored entries. Do not
+// apply model eligibility or comparison quotas to recovery.
+export function originalRatingChanges(data: Data): { subject: PoolSubject; from: number | null; to: number | null }[] {
+  return [...data.anchors, ...data.unrated.map(a => ({ ...a, rate: null }))].flatMap(subject => {
+    const record = data.records.find(r => r.subjectId === subject.id && r.subjectType === subject.type);
+    return record && record.originalRating !== subject.rate
+      ? [{ subject, from: subject.rate, to: record.originalRating }] : [];
+  });
+}
+
 export function rankedSubjects(data: Data, type: SubjectType, useManual = true): { subject: PoolSubject; result: Estimate | null; rank: number | null }[] {
   const ready = eligible(data.anchors, type);
   const estimates = estimateCategory(data, type);
